@@ -32,8 +32,8 @@ export class TodayTimelineView extends ItemView {
   private readonly nowMarker = new TimelineNowMarker(
     () => Date.now(),
     {
-      setInterval: (handler, ms) => globalThis.setInterval(handler, ms) as unknown as number,
-      clearInterval: (handle) => globalThis.clearInterval(handle),
+      setInterval: (handler, ms) => window.setInterval(handler, ms),
+      clearInterval: (handle) => window.clearInterval(handle),
     },
     () => this.render(),
   );
@@ -137,7 +137,7 @@ export class TodayTimelineView extends ItemView {
     if (column.entries.length === 0) {
       root.createEl("p", {
         cls: "hcv-empty",
-        text: "No Hermes-stated run instants fall on today for the current filter.",
+        text: "No runs today for the current filter.",
       });
     }
 
@@ -179,7 +179,7 @@ export class TodayTimelineView extends ItemView {
     const badge = block.createSpan({ cls: "hcv-entry-next-badge" });
     setIcon(badge, "alarm-clock");
     badge.createSpan({ cls: "hcv-entry-next-text", text: "Next scheduled run" });
-    badge.setAttribute("title", "Next scheduled run stated by Hermes");
+    badge.setAttribute("title", "Next scheduled run");
     block.dataset.jobId = entry.job.id;
     makeActivatable(block, () => this.openDetail(entry.job));
     return block;

@@ -1,9 +1,10 @@
 {
-  "id": "hermes-cron-viewer",
-  "name": "Hermes",
-  "version": "0.1.0",
-  "minAppVersion": "1.5.0",
-  "description": "Cron schedule viewer and profile document editor for remote Hermes hosts over existing SSH aliases.",
+  "id": "hermes-control-center",
+  "name": "Hermes Control Center",
+  "version": "1.0.0",
+  "minAppVersion": "1.7.2",
+  "description": "Monitor and manage remote Hermes Agent profiles over SSH: kanban boards, a profile canvas, skills, cron jobs and chat.",
   "author": "beomsu",
+  "authorUrl": "https://github.com/GoBeromsu",
   "isDesktopOnly": true
 }

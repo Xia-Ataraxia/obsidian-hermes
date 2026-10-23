@@ -5,8 +5,8 @@
  * remote login shell. Every path, file name and SQL string must pass through here first.
  */
 
-/** Control characters, NUL and newline can never appear in a bound token. */
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+/** Control characters (C0, DEL and C1), including NUL and newline, can never appear in a bound token. */
+const CONTROL_CHARACTERS = /\p{Cc}/u;
 
 export class UnquotableTokenError extends Error {
   constructor(readonly reason: "control-character") {

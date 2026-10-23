@@ -1,8 +1,8 @@
 import type { SchedulerClock } from "../types/view";
 
 const systemClock: SchedulerClock = {
-  setInterval: (handler, ms) => globalThis.setInterval(handler, ms) as unknown as number,
-  clearInterval: (handle) => globalThis.clearInterval(handle),
+  setInterval: (handler, ms) => window.setInterval(handler, ms),
+  clearInterval: (handle) => window.clearInterval(handle),
 };
 
 /**

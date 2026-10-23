@@ -94,12 +94,12 @@ export class ConnectionTargetModal extends Modal {
     root.createEl("h2", { text: "Edit connection target" });
     root.createEl("p", {
       cls: "hcv-settings-note",
-      text: "The target is an SSH alias from ~/.ssh/config, or a hostname ssh can resolve. HostName, User, Port, ProxyJump and keys still come from your SSH configuration and agent; this plugin never edits ~/.ssh/config.",
+      text: "The target is an SSH alias from your SSH config, or a host name SSH can resolve. Host, user, port, jump host and keys still come from your SSH config and agent, which this plugin never edits.",
     });
 
     const input = root.createEl("input", {
       attr: { type: "text", "aria-label": "SSH target", spellcheck: "false" },
-    }) as HTMLInputElement;
+    });
     input.value = this.buffer;
     input.disabled = this.busy;
     input.addEventListener("input", () => {
@@ -117,13 +117,13 @@ export class ConnectionTargetModal extends Modal {
     const save = actions.createEl("button", {
       text: "Save",
       attr: { type: "button" },
-    }) as HTMLButtonElement;
+    });
     save.disabled = this.busy;
     save.addEventListener("click", () => void this.save());
     const cancel = actions.createEl("button", {
       text: "Cancel",
       attr: { type: "button" },
-    }) as HTMLButtonElement;
+    });
     cancel.addEventListener("click", () => this.close());
   }
 }
