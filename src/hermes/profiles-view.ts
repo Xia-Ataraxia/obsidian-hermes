@@ -1,7 +1,7 @@
-import { setTooltip, type WorkspaceLeaf } from "obsidian";
+import { Notice, setTooltip, type WorkspaceLeaf } from "obsidian";
 import type { EdgeMode } from "../types/snapshot";
 import type { Edge, Profile, ProfilesSnapshot } from "./data";
-import { curve, hue, ring, snap, type Guide, type Rect } from "./geometry";
+import { curve, hue, overlap, ring, snap, tidy, type Gap, type Guide, type Rect } from "./geometry";
 import { Inspector } from "./inspector";
 import { avatar, compact, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
 
@@ -44,7 +44,8 @@ const plural = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? "" 
  * chosen kind (`EDGE_MODES`): thickness and opacity scale with volume, the gradient runs between
  * the two hues and the curve bows around the cards in between. Edges redraw whenever the canvas
  * or a card changes size, so a view rendered while hidden lays out once it is shown.
- * Dragging a card snaps it to the other cards' edges and centers with thin guides.
+ * Dragging a card snaps it to the other cards' edges, centers and equal gaps with thin guides.
+ * Shift-click or a marquee picks cards: picks move together, and Tidy up straightens them (or all).
  */
 export class ProfilesView extends HermesView {
   private snapshot: ProfilesSnapshot | null = null;
@@ -65,6 +66,14 @@ export class ProfilesView extends HermesView {
   private readonly uid = `hm${++instances}`;
   private inspector: Inspector | null = null;
   private observer: ResizeObserver | null = null;
+  private picks = new Set<string>();
+  /** Space is held: a left drag pans, even over a card. */
+  private space = false;
+  /** A pointer is down on the canvas: a re-render would drop the drag it may become. */
+  private pressed = false;
+  /** Lands the glide in flight on its targets and saves, unless a host switch swapped the layout meanwhile. */
+  private land: (() => void) | null = null;
+  private tidyButton!: HTMLElement;
 
   constructor(leaf: WorkspaceLeaf, host: HermesHost) {
     super(leaf, host, 60_000);
@@ -84,7 +93,7 @@ export class ProfilesView extends HermesView {
   override getIcon(): string { return "network"; }
 
   protected override busy(): boolean {
-    return this.dragging || (this.inspector?.editing ?? false);
+    return this.pressed || this.dragging || (this.inspector?.editing ?? false);
   }
 
   protected async pull(alias: string): Promise<string | null> {
@@ -94,6 +103,7 @@ export class ProfilesView extends HermesView {
       this.loadedAlias = alias;
       this.positions = new Map(Object.entries(this.host.layout(alias)));
       this.fitted = false;
+      this.picks.clear();
       this.inspector?.close();
     }
     this.snapshot = result;
@@ -228,6 +238,7 @@ export class ProfilesView extends HermesView {
     const { x, y, k } = this.camera;
     this.world.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
     this.canvas.style.setProperty("--grid", `${22 * k}px`);
+    this.canvas.style.setProperty("--k", String(k));
     this.canvas.style.backgroundPosition = `${x}px ${y}px`;
     this.zoomLabel?.setText(`${Math.round(k * 100)}%`);
   }
@@ -280,11 +291,14 @@ export class ProfilesView extends HermesView {
     }
   }
 
-  /** 1-screen-px lines (solid: edges, dashed: centers) with × where they meet the aligned cards; old lines fade out. */
-  private drawGuides(guides: readonly Guide[], targets: readonly string[] = []): void {
+  /**
+   * 1-screen-px lines (solid: edges, dashed: centers) with × where they meet the aligned cards, and
+   * |—| spans across equal gaps; old lines fade out.
+   */
+  private drawGuides(guides: readonly Guide[], targets: readonly string[] = [], gaps: readonly Gap[] = []): void {
     for (const [id, el] of this.cards) el.toggleClass("is-snap-target", targets.includes(id));
-    this.guideLayer.classList.toggle("is-on", guides.length > 0);
-    if (guides.length === 0) return;
+    this.guideLayer.classList.toggle("is-on", guides.length + gaps.length > 0);
+    if (guides.length + gaps.length === 0) return;
     const k = this.camera.k, over = 8 / k, size = 3 / k;
     this.guideLayer.replaceChildren();
     this.guideLayer.setAttribute("stroke-width", String(1 / k));
@@ -293,6 +307,12 @@ export class ProfilesView extends HermesView {
       const [x1, y1] = point(Math.min(...guide.marks) - over), [x2, y2] = point(Math.max(...guide.marks) + over);
       svg(this.guideLayer, "line", { x1, y1, x2, y2, "stroke-dasharray": guide.center ? `${4 / k} ${3 / k}` : "none" });
       svg(this.guideLayer, "path", { d: guide.marks.map(mark => { const [x, y] = point(mark); return `M${x - size},${y - size}L${x + size},${y + size}M${x - size},${y + size}L${x + size},${y - size}`; }).join("") });
+    }
+    for (const gap of gaps) {
+      const point = (along: number, across: number): [number, number] => gap.axis === "x" ? [along, across] : [across, along];
+      const line = ([x1, y1]: [number, number], [x2, y2]: [number, number]): SVGLineElement => svg(this.guideLayer, "line", { x1, y1, x2, y2 });
+      line(point(gap.from, gap.at), point(gap.to, gap.at));
+      for (const end of [gap.from, gap.to]) line(point(end, gap.at - size), point(end, gap.at + size));
     }
   }
 
@@ -313,6 +333,7 @@ export class ProfilesView extends HermesView {
 
   private bind(): void {
     const canvas = this.canvas;
+    this.pick(this.picks);
     canvas.addEventListener("wheel", event => {
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) this.zoom(Math.exp(-event.deltaY * 0.01), event.clientX, event.clientY);
@@ -321,51 +342,91 @@ export class ProfilesView extends HermesView {
 
     canvas.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
-      if (event.button !== 0 || target.closest("button, input, select, .hm-controls, .hm-legend")) return;
+      if (target.closest("button, input, select, .hm-controls, .hm-legend")) return;
       const card = target.closest<HTMLElement>(".hm-card");
+      // Space or the middle button pans from anywhere, a finger from empty canvas; a plain drag there draws a marquee.
+      const pan = event.button === 1 || (event.button === 0 && (this.space || (event.pointerType === "touch" && !card)));
+      if (!pan && event.button !== 0) return;
+      if (event.button === 1) event.preventDefault(); // or Chromium on Windows starts autoscroll
+      this.pressed = true;
       const startX = event.clientX, startY = event.clientY;
       let moved = false;
-      canvas.setPointerCapture(event.pointerId);
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* a synthetic pointer has nothing to capture */ }
 
       let onMove: (e: PointerEvent) => void;
       let onUp: () => void;
-      if (card) {
+      if (card && !pan) {
         const id = card.dataset.id!;
-        const origin = this.rect(id);
-        const ids = [...this.cards.keys()].filter(other => other !== id);
+        const was = this.picks.has(id);
+        // Picks change on press, like Figma: Shift adds the card, a plain press on an unpicked one starts over.
+        if (!was) this.pick(event.shiftKey ? [...this.picks, id] : []);
+        const group = this.picks.has(id) && this.picks.size >= 2 ? [...this.picks] : [id];
+        const origins = new Map(group.map(member => [member, this.rect(member)] as const));
+        const rects = [...origins.values()];
+        const left = Math.min(...rects.map(r => r.x)), top = Math.min(...rects.map(r => r.y));
+        const box = { x: left, y: top, w: Math.max(...rects.map(r => r.x + r.w)) - left, h: Math.max(...rects.map(r => r.y + r.h)) - top };
+        const ids = [...this.cards.keys()].filter(other => !origins.has(other));
         const others = ids.map(other => this.rect(other));
         onMove = e => {
           if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 3) return;
-          if (!moved) { moved = true; this.dragging = true; this.focus(null); card.addClass("is-dragging"); }
-          const free = { ...origin, x: origin.x + (e.clientX - startX) / this.camera.k, y: origin.y + (e.clientY - startY) / this.camera.k };
+          if (!moved) { moved = true; this.dragging = true; this.focus(null); for (const member of group) this.cards.get(member)?.addClass("is-dragging"); }
+          const free = { ...box, x: box.x + (e.clientX - startX) / this.camera.k, y: box.y + (e.clientY - startY) / this.camera.k };
           // Alt drags freely, like PowerPoint.
-          const snapped = e.altKey ? { x: free.x, y: free.y, guides: [], targets: [] } : snap(free, others, 6 / this.camera.k);
-          this.positions.set(id, [Math.round(snapped.x), Math.round(snapped.y)]);
-          this.place(id);
-          this.drawGuides(snapped.guides, snapped.targets.map(index => ids[index]!));
+          const snapped = e.altKey ? { x: free.x, y: free.y, guides: [], gaps: [], targets: [] } : snap(free, others, 6 / this.camera.k);
+          for (const [member, origin] of origins) {
+            this.positions.set(member, [Math.round(origin.x + snapped.x - box.x), Math.round(origin.y + snapped.y - box.y)]);
+            this.place(member);
+          }
+          this.drawGuides(snapped.guides, snapped.targets.map(index => ids[index]!), snapped.gaps);
           this.drawEdges();
         };
         onUp = () => {
-          card.removeClass("is-dragging");
+          for (const member of group) this.cards.get(member)?.removeClass("is-dragging");
           this.drawGuides([]);
           this.dragging = false;
-          if (moved) this.saveLayout(); else this.inspect(id);
+          if (moved) this.saveLayout();
+          else if (event.shiftKey) { if (was) this.pick([...this.picks].filter(other => other !== id)); }
+          else { this.pick([]); this.inspect(id); }
         };
-      } else {
+      } else if (pan) {
         const camera = { ...this.camera };
         canvas.addClass("is-panning");
         onMove = e => {
-          moved = moved || Math.hypot(e.clientX - startX, e.clientY - startY) >= 3;
           this.camera.x = camera.x + e.clientX - startX;
           this.camera.y = camera.y + e.clientY - startY;
           this.apply();
         };
-        onUp = () => { canvas.removeClass("is-panning"); if (!moved) this.inspector?.close(); };
+        onUp = () => canvas.removeClass("is-panning");
+      } else {
+        const base = event.shiftKey ? [...this.picks] : [];
+        const rects = [...this.cards.keys()].map(other => [other, this.rect(other)] as const);
+        const bounds = canvas.getBoundingClientRect();
+        let marquee: HTMLElement | null = null;
+        onMove = e => {
+          if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 3) return;
+          moved = true;
+          this.dragging = true;
+          const el = (marquee ??= canvas.createDiv("hm-marquee"));
+          const x = Math.min(startX, e.clientX) - bounds.left, y = Math.min(startY, e.clientY) - bounds.top;
+          const w = Math.abs(e.clientX - startX), h = Math.abs(e.clientY - startY);
+          el.style.transform = `translate(${x}px, ${y}px)`;
+          el.style.width = `${w}px`;
+          el.style.height = `${h}px`;
+          const { x: cx, y: cy, k } = this.camera;
+          const area = { x: (x - cx) / k, y: (y - cy) / k, w: w / k, h: h / k };
+          this.pick([...base, ...rects.filter(([, r]) => overlap(area, r) > 0).map(([other]) => other)]);
+        };
+        onUp = () => {
+          marquee?.remove();
+          this.dragging = false;
+          if (!moved) { if (!event.shiftKey) this.pick([]); this.inspector?.close(); }
+        };
       }
       const up = (): void => {
         canvas.removeEventListener("pointermove", onMove);
         canvas.removeEventListener("pointerup", up);
         canvas.removeEventListener("pointercancel", up);
+        this.pressed = false;
         onUp();
       };
       canvas.addEventListener("pointermove", onMove);
@@ -383,12 +444,16 @@ export class ProfilesView extends HermesView {
     iconButton(bar, "plus", "Zoom in", () => this.zoom(1.2));
     bar.createDiv("hm-sep");
     iconButton(bar, "scan", "Fit", () => this.fit());
-    iconButton(bar, "layout-grid", "Auto layout", () => {
+    this.tidyButton = iconButton(bar, "layout-grid", "Tidy up", () => this.tidyUp());
+    iconButton(bar, "rotate-ccw", "Reset layout", () => {
+      if (this.dragging) return;
+      const before = new Map(this.positions);
       this.positions.clear();
       this.bows.clear();
       this.fitted = false;
       this.render();
       this.saveLayout();
+      this.undoable("Layout reset", before);
     });
     this.legend = this.canvas.createDiv("hm-legend");
     this.drawLegend();
@@ -410,8 +475,95 @@ export class ProfilesView extends HermesView {
     scale.createSpan({ text: `${max > 1 ? "1–" : ""}${plural(max, unit)}` });
   }
 
+  /** Under the host the positions came from: `alias` switches before its pull lands. */
   private saveLayout(): void {
-    this.host.saveLayout(this.alias, Object.fromEntries(this.positions));
+    this.host.saveLayout(this.loadedAlias, Object.fromEntries(this.positions));
+  }
+
+  /** Space-to-pan and Esc, for keys aimed at this view: not other leaves, modals or the drawer. */
+  override async onOpen(): Promise<void> {
+    await super.onOpen();
+    const ours = (event: KeyboardEvent): boolean => {
+      const target = event.target as HTMLElement;
+      return !event.defaultPrevented && this.app.workspace.getActiveViewOfType(ProfilesView) === this
+        && (target.contains(this.contentEl) || (this.contentEl.contains(target) && !target.closest(".hm-drawer")));
+    };
+    const hold = (on: boolean): void => { this.space = on; this.contentEl.toggleClass("is-space", on); };
+    this.registerDomEvent(this.contentEl.doc, "keydown", event => {
+      if (!ours(event)) return;
+      if (event.key === "Escape" && this.picks.size > 0) this.pick([]);
+      // A clicked button keeps focus; only a keyboard-focused one keeps Space for itself.
+      if (event.key === " " && !(event.target as HTMLElement).closest("input, textarea, select, button:focus-visible, [contenteditable]")) {
+        event.preventDefault();
+        hold(true);
+      }
+    });
+    this.registerDomEvent(this.contentEl.doc, "keyup", event => { if (event.key === " ") hold(false); });
+    this.registerDomEvent(this.contentEl.win, "blur", () => hold(false));
+  }
+
+  private pick(ids: Iterable<string>): void {
+    this.picks = new Set([...ids].filter(id => this.cards.has(id)));
+    for (const [id, el] of this.cards) el.toggleClass("is-picked", this.picks.has(id));
+    const label = this.picks.size >= 2 ? "Tidy up selection" : "Tidy up";
+    if (this.tidyButton.getAttr("aria-label") === label) return;
+    this.tidyButton.setAttr("aria-label", label);
+    setTooltip(this.tidyButton, label);
+  }
+
+  private tidyUp(): void {
+    if (this.dragging) return;
+    const ids = this.picks.size >= 2 ? [...this.picks] : [...this.cards.keys()];
+    const moved = tidy(new Map([...this.cards.keys()].map(id => [id, this.rect(id)])), ids);
+    if (moved.size === 0) { new Notice("Already tidy"); return; }
+    const before = new Map<string, [number, number]>([...moved.keys()].map(id => [id, this.positions.get(id) ?? [0, 0]]));
+    this.move(moved);
+    this.undoable(`Tidied ${plural(moved.size, "card")}`, before);
+  }
+
+  /** Glide cards to `to` (instant under reduced motion), then save; a new move first lands the one in flight. */
+  private move(to: ReadonlyMap<string, readonly [number, number]>): void {
+    this.land?.();
+    const win = this.contentEl.win, map = this.positions;
+    const from = new Map<string, [number, number]>([...to.keys()].map(id => [id, map.get(id) ?? [0, 0]]));
+    const ms = win.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 180;
+    let start: number | undefined, tween = 0;
+    this.dragging = true;
+    const land = (): void => {
+      win.cancelAnimationFrame(tween);
+      this.land = null;
+      this.dragging = false;
+      if (this.positions !== map) return;
+      for (const [id, [x, y]] of to) { map.set(id, [x, y]); this.place(id); }
+      this.drawEdges();
+      this.saveLayout();
+    };
+    const frame = (now: number): void => {
+      start ??= now;
+      const t = ms === 0 ? 1 : Math.min(1, (now - start) / ms), ease = 1 - (1 - t) ** 3;
+      if (t === 1 || this.positions !== map) { land(); return; }
+      for (const [id, [x, y]] of to) {
+        const [fx, fy] = from.get(id)!;
+        map.set(id, [Math.round(fx + (x - fx) * ease), Math.round(fy + (y - fy) * ease)]);
+        this.place(id);
+      }
+      this.drawEdges();
+      tween = win.requestAnimationFrame(frame);
+    };
+    this.land = land;
+    tween = win.requestAnimationFrame(frame);
+  }
+
+  /** A notice with an Undo button that glides the cards back, unless the host changed meanwhile. */
+  private undoable(text: string, before: ReadonlyMap<string, readonly [number, number]>): void {
+    const alias = this.alias;
+    const notice = new Notice(createFragment(fragment => {
+      fragment.appendText(`${text} `);
+      fragment.createEl("button", { text: "Undo" }).addEventListener("click", () => {
+        notice.hide();
+        if (this.alias === alias) this.move(before);
+      });
+    }), 6000);
   }
 
   private inspect(id: string): void {
@@ -426,6 +578,8 @@ export class ProfilesView extends HermesView {
   }
 
   override async onClose(): Promise<void> {
+    this.land?.();
+    this.dragging = false;
     this.observer?.disconnect();
     this.inspector?.close();
   }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { dropMove, HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
-import { curve, snap } from "../src/hermes/geometry";
+import { curve, snap, tidy } from "../src/hermes/geometry";
 import { parseSections } from "../src/hermes/remote";
 
 test("snap locks edges within threshold and emits a guide", () => {
@@ -11,6 +11,33 @@ test("snap locks edges within threshold and emits a guide", () => {
   expect(result.targets).toEqual([0]);
   expect(snap({ x: 26, y: 200, w: 50, h: 50 }, [other], 6).guides[0]).toMatchObject({ at: 50, center: true });
   expect(snap({ x: 120, y: 200, w: 100, h: 50 }, [other], 6).x).toBe(120);
+});
+
+test("snap centers a rect between two neighbors and matches an existing gap", () => {
+  const a = { x: 0, y: 0, w: 100, h: 50 };
+  const centered = snap({ x: 148, y: 10, w: 100, h: 50 }, [a, { x: 300, y: 0, w: 100, h: 50 }], 6);
+  expect([centered.x, centered.y, centered.guides]).toEqual([150, 10, []]);
+  expect([...centered.gaps].sort((m, n) => m.from - n.from)).toEqual([{ axis: "x", from: 100, to: 150, at: 30 }, { axis: "x", from: 250, to: 300, at: 30 }]);
+  expect([...centered.targets].sort()).toEqual([0, 1]);
+  const matched = snap({ x: 297, y: 10, w: 100, h: 50 }, [a, { x: 150, y: 0, w: 100, h: 50 }], 6);
+  expect([matched.x, matched.gaps.length]).toEqual([300, 2]);
+  const right = snap({ x: 345, y: 10, w: 100, h: 50 }, [a, { x: 150, y: 0, w: 100, h: 50 }, { x: 500, y: 0, w: 100, h: 50 }], 6);
+  expect([right.x, right.gaps.map(gap => gap.at)]).toEqual([350, [30, 30]]);
+});
+
+test("tidy straightens near rows and columns, leaves lone and overlapping cards and staircases, and is idempotent", () => {
+  const card = (x: number, y: number) => ({ x, y, w: 280, h: 200 });
+  const rects = new Map([["a", card(0, 0)], ["b", card(320, 30)], ["c", card(16, 300)], ["lone", card(1000, 1000)], ["p", card(2000, 2000)], ["q", card(2020, 2020)]]);
+  const moved = tidy(rects, [...rects.keys()]);
+  expect(moved).toEqual(new Map([["b", [320, 0]], ["c", [0, 300]]]));
+  for (const [id, [x, y]] of moved) rects.set(id, { ...rects.get(id)!, x, y });
+  expect(tidy(rects, [...rects.keys()]).size).toBe(0);
+  const stairs = new Map([["s", card(0, 0)], ["t", card(320, 40)], ["u", card(640, 80)]]);
+  expect(tidy(stairs, [...stairs.keys()])).toEqual(new Map([["t", [320, 0]]]));
+  const row = new Map([["s0", card(0, 0)], ["s1", card(320, 10)], ["s2", card(640, 20)], ["s3", card(960, 30)], ["z", card(640, -185)]]);
+  expect(tidy(row, [...row.keys()])).toEqual(new Map([["s0", [0, 10]]]));
+  const chain = new Map([["a", card(0, 50)], ["b", card(320, 54)], ["c", card(640, 60)], ["d", card(960, 102)], ["e", card(1280, 150)]]);
+  expect(tidy(chain, [...chain.keys()])).toEqual(new Map([["a", [0, 54]], ["c", [640, 54]], ["d", [960, 54]], ["e", [1280, 54]]]));
 });
 
 test("curve runs border to border, bows around a card in between and keeps a clear preferred bow", () => {
