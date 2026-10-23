@@ -91,7 +91,7 @@ describe("built bundle", () => {
     expect(typeof instance.onload).toBe("function");
   });
 
-  test("onload registers both views, the commands and the settings tab", async () => {
+  test("onload registers all four views, the commands and the settings tab", async () => {
     const { plugin } = loadBundle();
     const instance = new plugin({ workspace: {} }, { id: "hermes-cron-viewer" }) as unknown as {
       onload: () => Promise<void>;
@@ -106,12 +106,16 @@ describe("built bundle", () => {
     expect(instance.registered).toEqual([
       "hermes-cron-today-timeline",
       "hermes-cron-week-calendar",
+      "hermes-kanban",
+      "hermes-profiles",
     ]);
     expect(instance.commands).toEqual([
       "open-today-timeline",
       "open-week-calendar",
       "refresh-now",
       "open-settings",
+      "open-hermes-kanban",
+      "open-hermes-profiles",
     ]);
     expect(instance.ribbons).toEqual(["Hermes: Today", "Hermes: Settings"]);
     expect(instance.settingTabs).toHaveLength(1);

@@ -1,0 +1,281 @@
+--- a/hermes_cli/web_server_dashboard.py
++++ b/hermes_cli/web_server_dashboard.py
+@@ -521,7 +521,14 @@
+     return search_dirs
+ 
+ 
++class InvalidDashboardPluginEntry(ValueError):
++    pass
++
++
+ def _dashboard_plugin_entry(data: dict[str, Any], name: str, dashboard_dir: Path, source: str) -> dict[str, Any]:
++    entry = data.get("entry", "dist/index.js")
++    if entry is not None and (not isinstance(entry, str) or not entry.strip()):
++        raise InvalidDashboardPluginEntry(f"Plugin {name}: entry must be a non-empty string or null for API-only plugins")
+     # Tab options: ``path`` + ``position`` for a new tab, optional ``override`` to replace a
+     # built-in route, and ``hidden`` to register component/slots without adding a tab.
+     raw_tab = data.get("tab", {}) if isinstance(data.get("tab"), dict) else {}
+@@ -553,7 +560,8 @@
+         "version": data.get("version", "0.0.0"),
+         "tab": tab_info,
+         "slots": slots,
+-        "entry": data.get("entry", "dist/index.js"),
++        "entry": entry,
++        "has_ui": entry is not None,
+         "css": data.get("css"),
+         "has_api": bool(safe_api),
+         "source": source,
+--- a/web/src/plugins/types.ts
++++ b/web/src/plugins/types.ts
+@@ -19,7 +19,8 @@
+   };
+   /** Declared for discovery; actual slots use registerSlot in the plugin bundle. */
+   slots?: string[];
+-  entry: string;
++  entry: string | null;
++  has_ui?: boolean;
+   css?: string | null;
+   has_api: boolean;
+   /**
+--- a/web/src/plugins/usePlugins.ts
++++ b/web/src/plugins/usePlugins.ts
+@@ -27,6 +27,12 @@
+ 
+ export const MANIFEST_CACHE_KEY = "hermes:plugin-manifests";
+ 
++type BrowserPluginManifest = PluginManifest & { entry: string };
++
++function hasBrowserEntry(manifest: PluginManifest): manifest is BrowserPluginManifest {
++  return manifest.entry !== null && manifest.has_ui !== false;
++}
++
+ /** One profile's cached list: another profile's never seeds it. */
+ function manifestCacheKey(profile: string): string {
+   return `${MANIFEST_CACHE_KEY}:${profile}`;
+@@ -89,7 +95,7 @@
+ /** The manifests of one profile and whether its plugins are still loading. */
+ interface ProfileManifests {
+   profile: string;
+-  manifests: PluginManifest[];
++  manifests: BrowserPluginManifest[];
+   loading: boolean;
+ }
+ 
+@@ -98,7 +104,7 @@
+ // safety net for the very first visit (no cache yet). Exception: a cached
+ // /chat override keeps loading=true (see canSeedLoadedFromCache).
+ function seedManifests(profile: string): ProfileManifests {
+-  const cached = getCachedManifests(profile);
++  const cached = getCachedManifests(profile)?.filter(hasBrowserEntry) ?? null;
+   return { profile, manifests: cached ?? [], loading: !canSeedLoadedFromCache(cached) };
+ }
+ 
+@@ -144,10 +150,11 @@
+       .getPlugins(profile)
+       .then((list) => {
+         if (!current) return;
+-        cacheManifests(profile, list);
++        const browserManifests = list.filter(hasBrowserEntry);
++        cacheManifests(profile, browserManifests);
+         setState((s) =>
+           s.profile === profile
+-            ? { profile, manifests: list, loading: s.loading && list.length > 0 }
++            ? { profile, manifests: browserManifests, loading: s.loading && browserManifests.length > 0 }
+             : s,
+         );
+       })
+--- a/omh/manifest.json
++++ b/omh/manifest.json
+@@ -1,5 +1,6 @@
+ {
+   "name": "omh",
+   "api": "plugin_api.py",
++  "entry": null,
+   "tab": {"hidden": true}
+ }
+--- /dev/null
++++ b/web/src/plugins/usePlugins.api-only.test.tsx
+@@ -0,0 +1,91 @@
++// @vitest-environment jsdom
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { act, createElement, useEffect } from "react";
++import { createRoot, type Root } from "react-dom/client";
++import type { PluginManifest } from "./types";
++import fixtures from "./api-only-fixtures.json";
++
++const response = vi.hoisted(() => ({ list: [] as PluginManifest[] }));
++vi.mock("@/lib/api", async (original) => {
++  const actual = await original<typeof import("@/lib/api")>();
++  return { ...actual, api: { ...actual.api, getPlugins: async () => response.list } };
++});
++import { usePlugins, cacheManifests } from "./usePlugins";
++import { exposePluginSDK, getPluginLoadError, selectPluginProfile } from "./registry";
++
++Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
++let root: Root;
++let latest: ReturnType<typeof usePlugins> | undefined;
++function Probe() {
++  const result = usePlugins("task15");
++  useEffect(() => { latest = result; });
++  return createElement("div", null, result.plugins.map((plugin) =>
++    createElement(plugin.component, { key: plugin.manifest.name })));
++}
++beforeEach(() => {
++  sessionStorage.clear();
++  selectPluginProfile("reset");
++  exposePluginSDK();
++  latest = undefined;
++  const container = document.createElement("div");
++  document.body.appendChild(container);
++  root = createRoot(container);
++});
++afterEach(() => {
++  act(() => root.unmount());
++  document.head.innerHTML = "";
++  document.body.innerHTML = "";
++  vi.restoreAllMocks();
++});
++const fixture = (name: string): PluginManifest => {
++  const value = fixtures.find((item) => item.name === name);
++  if (!value) throw new Error(`Missing normalized fixture ${name}`);
++  return value;
++};
++async function show(list: PluginManifest[]) {
++  response.list = list;
++  await act(async () => root.render(createElement(Probe)));
++}
++
++describe("normalized API-only and browser plugin contracts", () => {
++  it("settles API-only discovery without scripts, styles, or UI routes", async () => {
++    await show([fixture("api-only")]);
++    expect(document.querySelectorAll("script[data-hermes-plugin],link[rel=stylesheet]")).toHaveLength(0);
++    expect(latest?.manifests).toEqual([]);
++    expect(latest?.loading).toBe(false);
++    expect(getPluginLoadError("api-only")).toBeUndefined();
++  });
++  it("discards an API-only cached chat override before initial UI routing", async () => {
++    const api = fixture("api-only");
++    cacheManifests("task15", [{ ...api, tab: { path: "/api-only", override: "/chat" } }]);
++    await show([api]);
++    expect(latest?.manifests).toEqual([]);
++    expect(latest?.loading).toBe(false);
++    expect(document.querySelectorAll("script[data-hermes-plugin]")).toHaveLength(0);
++  });
++  it.each(["hidden", "explicit", "legacy"])("loads and renders %s UI while API-only is present", async (name) => {
++    const browser = fixture(name);
++    await show([fixture("api-only"), browser]);
++    const script = document.querySelector<HTMLScriptElement>(`script[data-hermes-plugin="${name}"]`);
++    expect(script?.src).toContain(`/dashboard-plugins/@task15/${name}/${browser.entry}`);
++    Object.defineProperty(document, "currentScript", { configurable: true, get: () => script });
++    try {
++      const sdk = window.__HERMES_PLUGINS__;
++      if (!sdk) throw new Error("SDK missing");
++      await act(async () => sdk.register(name, () => createElement("p", null, `${name} rendered`)));
++    } finally {
++      Reflect.deleteProperty(document, "currentScript");
++    }
++    expect(document.body.textContent).toContain(`${name} rendered`);
++    expect(latest?.loading).toBe(false);
++  });
++  it("retains a useful load error for an explicitly missing browser entry", async () => {
++    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
++    await show([fixture("missing")]);
++    const script = document.querySelector('script[data-hermes-plugin="missing"]');
++    if (!script) throw new Error("Missing script injection");
++    await act(async () => { script.dispatchEvent(new Event("error")); });
++    expect(getPluginLoadError("missing")).toBe("LOAD_FAILED");
++    expect(warning).toHaveBeenCalledWith(expect.stringContaining("missing.js"));
++  });
++});
+--- /dev/null
++++ b/web/src/plugins/api-only-fixtures.json
+@@ -0,0 +1,88 @@
++[
++  {
++    "name": "api-only",
++    "label": "api-only",
++    "description": "",
++    "icon": "Puzzle",
++    "version": "0.0.0",
++    "tab": {
++      "path": "/api-only",
++      "position": "end"
++    },
++    "slots": [],
++    "entry": null,
++    "has_ui": false,
++    "css": "unused.css",
++    "has_api": true,
++    "source": "user"
++  },
++  {
++    "name": "explicit",
++    "label": "explicit",
++    "description": "",
++    "icon": "Puzzle",
++    "version": "0.0.0",
++    "tab": {
++      "path": "/explicit",
++      "position": "end"
++    },
++    "slots": [],
++    "entry": "explicit.js",
++    "has_ui": true,
++    "css": null,
++    "has_api": false,
++    "source": "user"
++  },
++  {
++    "name": "hidden",
++    "label": "hidden",
++    "description": "",
++    "icon": "Puzzle",
++    "version": "0.0.0",
++    "tab": {
++      "path": "/hidden",
++      "position": "end",
++      "hidden": true
++    },
++    "slots": [],
++    "entry": "hidden.js",
++    "has_ui": true,
++    "css": null,
++    "has_api": false,
++    "source": "user"
++  },
++  {
++    "name": "legacy",
++    "label": "legacy",
++    "description": "",
++    "icon": "Puzzle",
++    "version": "0.0.0",
++    "tab": {
++      "path": "/legacy",
++      "position": "end"
++    },
++    "slots": [],
++    "entry": "dist/index.js",
++    "has_ui": true,
++    "css": null,
++    "has_api": false,
++    "source": "user"
++  },
++  {
++    "name": "missing",
++    "label": "missing",
++    "description": "",
++    "icon": "Puzzle",
++    "version": "0.0.0",
++    "tab": {
++      "path": "/missing",
++      "position": "end"
++    },
++    "slots": [],
++    "entry": "missing.js",
++    "has_ui": true,
++    "css": null,
++    "has_api": false,
++    "source": "user"
++  }
++]
+\ No newline at end of file

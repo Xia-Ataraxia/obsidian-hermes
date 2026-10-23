@@ -1,0 +1,11 @@
+--- hermes_dashboard_tailscale_proxy.py
++++ hermes_dashboard_tailscale_proxy.py
+@@ -30,7 +30,7 @@
+     headers = {
+         key: value
+         for key, value in request.headers.items()
+-        if key.lower() not in HOP_BY_HOP and key.lower() != "host"
++        if key.lower() not in HOP_BY_HOP and key.lower() not in {"host", "sec-websocket-extensions"}
+     }
+     headers["Host"] = "127.0.0.1:9119"
+     return headers

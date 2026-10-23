@@ -1,13 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { RemoteRunner } from "../src/types/remote-command";
 import { SshReadOnlyAdapter } from "../src/ui/ssh-read-only-adapter";
 import { readExecutionHistory } from "../src/ui/execution-history-reader";
+import { buildQueryExecutions } from "../src/domain/sqlite-select-builder";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,7 +26,7 @@ const execFileAsync = promisify(execFile);
 let dir = "";
 let home = "";
 let dbPath = "";
-let sqliteAvailable = true;
+
 
 /** Runs the production command locally, so the exact production argv shape is exercised. */
 const localRunner: RemoteRunner = async (_file, args, options) => {
@@ -61,12 +62,7 @@ function listing(path: string): Record<string, { size: number; mtimeMs: number }
 }
 
 beforeAll(async () => {
-  try {
-    await execFileAsync("/usr/bin/sqlite3", ["--version"]);
-  } catch {
-    sqliteAvailable = false;
-    return;
-  }
+  await execFileAsync("/usr/bin/sqlite3", ["--version"]);
   dir = mkdtempSync(join(tmpdir(), "hcv-ac17-"));
   home = join(dir, ".hermes");
   dbPath = join(home, "cron", "executions.db");
@@ -90,12 +86,62 @@ afterAll(() => {
 });
 
 describe("AC17 isolated fixture", () => {
-  test("a read-only query leaves semantic data and schema unchanged", async () => {
-    if (!sqliteAvailable) {
-      expect(sqliteAvailable).toBe(false); // sqlite3 unavailable: recorded, not silently skipped
-      return;
-    }
+  test.each([
+    { name: "absent", present: false, exit: 0, selected: "fallback" },
+    { name: "success", present: true, exit: 0, selected: "preferred" },
+    { name: "failure", present: true, exit: 23, selected: "preferred" },
+  ])("selects once when the preferred executable is $name", ({ name, present, exit, selected }) => {
+    // Given a hermetic executable fixture. Only this test substitutes the fixed candidate path.
+    const bin = join(dir, name);
+    mkdirSync(bin);
+    const preferred = join(bin, "preferred");
+    writeFileSync(join(bin, "sqlite3"), "#!/bin/sh\nprintf '%s\\0' fallback \"$@\"\n", { mode: 0o700 });
+    if (present) writeFileSync(preferred, `#!/bin/sh\nprintf '%s\\0' preferred "$@"\nexit ${exit}\n`, { mode: 0o700 });
+    const hostileHome = join(dir, "space ' ?#% ;$(id)`id`| 한글");
+    const command = buildQueryExecutions(hostileHome, { limit: 2 });
+    if (!command.ok) throw new TypeError("Synthetic home refused");
+    const modeled = command.command.remoteCommand.replaceAll("/opt/homebrew/opt/sqlite/bin/sqlite3", preferred);
 
+    // When the real shell executes the fixed branch structure, including a failing preferred CLI.
+    const result = Bun.spawnSync(["/bin/sh", "-c", modeled], { env: { ...process.env, PATH: bin } });
+
+    // Then exactly one executable receives the intact path and one closed SELECT, without retry.
+    expect(result.exitCode).toBe(exit);
+    expect(result.stderr.toString()).toBe("");
+    expect(result.stdout.toString().split("\0")).toEqual([
+      selected, "-readonly", "-json", `${hostileHome}/cron/executions.db`,
+      "SELECT id, job_id, status, source, claimed_at, started_at, finished_at, error, delivery_outcome, scheduled_instant FROM executions ORDER BY claimed_at DESC, id DESC LIMIT 2", "",
+    ]);
+  });
+
+  test("reads a WAL ledger when its coordination files are absent", async () => {
+    // Given a closed synthetic WAL database, without its coordination files.
+    const walHome = join(dir, "wal");
+    const walDb = join(walHome, "cron", "executions.db");
+    await execFileAsync("/bin/mkdir", ["-p", join(walHome, "cron")]);
+    copyFileSync(dbPath, walDb);
+    await execFileAsync("/usr/bin/sqlite3", [walDb, "PRAGMA journal_mode=WAL;"]);
+    expect(readdirSync(join(walHome, "cron"))).toEqual(["executions.db"]);
+    const before = digest(walDb);
+
+    // When the exact production command opens it read-only.
+    const result = await readExecutionHistory(
+      new SshReadOnlyAdapter({ runner: localRunner }),
+      { alias: "local-fixture", profileId: "default", home: walHome },
+      { limit: 50 },
+    );
+
+    // Then rows survive and the database itself is unchanged; coordination is allowed.
+    expect(result.status).toBe("read");
+    expect(result.rows.map((row) => row.id)).toEqual(["e1", "e2"]);
+    expect(result.rows[1]?.error).toBe("boom | pipe");
+    expect(digest(walDb)).toBe(before);
+    const appeared = readdirSync(join(walHome, "cron"));
+    expect(appeared.every((name) => ["executions.db", "executions.db-wal", "executions.db-shm"].includes(name))).toBe(true);
+    console.log(`AC17 WAL sidecar outcome: ${JSON.stringify(appeared)}`);
+  });
+
+  test("a read-only query leaves semantic data and schema unchanged", async () => {
     const beforeDigest = digest(dbPath);
     const beforeSchema = (
       await execFileAsync("/usr/bin/sqlite3", [dbPath, "SELECT sql FROM sqlite_master ORDER BY name;"])
@@ -145,7 +191,6 @@ describe("AC17 isolated fixture", () => {
   });
 
   test("a read-only query never creates the database when it is absent", async () => {
-    if (!sqliteAvailable) return;
     const emptyHome = join(dir, "empty", ".hermes");
     await execFileAsync("/bin/mkdir", ["-p", join(emptyHome, "cron")]);
 

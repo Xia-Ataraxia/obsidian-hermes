@@ -22,6 +22,11 @@ export class SourceStatusTracker {
       return { label: `${source.alias} / ${source.profileId}`, state };
     });
   }
+  forget(alias: string): void {
+    for (const key of this.freshness.keys()) if (decodeSourceKey(key).alias === alias) this.freshness.delete(key);
+    for (const key of this.ledgers.keys()) if (decodeSourceKey(key).alias === alias) this.ledgers.delete(key);
+  }
+  clear(): void { this.freshness.clear(); this.ledgers.clear(); }
 
   /** Record the outcome of one round for one source. */
   record(snapshot: SourceSnapshot, ledger: LedgerReadResult): void {

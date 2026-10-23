@@ -6,6 +6,8 @@ import { INITIAL_FRESHNESS, freshnessSummary, reduceFreshness } from "../src/dom
 import { PROJECTION_LIMITS, projectSnapshot } from "../src/domain/snapshot-projection";
 import { RefreshScheduler } from "../src/ui/refresh-scheduler";
 import { Logger } from "../src/utils/logger";
+import { parseJobsJson } from "../src/domain/jobs-json-parser";
+import { rehydrateSnapshot } from "../src/domain/snapshot-restore";
 
 const SOURCE: SourceKey = { alias: "m1-file", profileId: "default" };
 const SENTINEL = "SENTINEL-BODY-9f3a1c";
@@ -90,6 +92,32 @@ function executionRow(): ExecutionRow {
 }
 
 describe("snapshot projection", () => {
+  test("authored definitions cannot be recovered after projection and restore", () => {
+    // Given private sentinels in every authored execution field.
+    const raw = { id: "private-job", prompt: SENTINEL, script: SENTINEL, profile: SENTINEL,
+      skill: SENTINEL, skills: [SENTINEL], enabled_toolsets: [SENTINEL], workdir: SENTINEL,
+      model: SENTINEL, provider: SENTINEL, reasoning_effort: SENTINEL, deliver: SENTINEL,
+      failure_deliver: SENTINEL, schedule: { kind: "cron", expr: SENTINEL }, schedule_display: SENTINEL };
+    const jobs = parseJobsJson(SOURCE, { jobs: [raw] }).jobs;
+    // When serializing the allowlist projection and rehydrating it.
+    const disk = projectSnapshot(snapshot(jobs), [], [], { persistJobNames: false });
+    const restored = rehydrateSnapshot(disk);
+    // Then the disk has no definition fields or bodies and restart exposes no authored content.
+    expect(JSON.stringify(disk)).not.toContain(SENTINEL);
+    expect(Object.keys(disk.jobs[0] ?? {})).not.toContain("executionDefinition");
+    expect(restored.jobs[0]?.executionDefinition).toBeNull();
+    expect(restored.jobs[0]?.prompt).toBeNull();
+  });
+
+  test("a mismatched job cannot be persisted under another storage owner", () => {
+    // Given a job read from a different owner's jobs.json.
+    const foreign = parseJobsJson({ ...SOURCE, profileId: "xia" }, { jobs: [{ id: "foreign" }] }).jobs;
+    // When projecting it inside the default owner's snapshot.
+    const disk = projectSnapshot(snapshot(foreign), [], [], { persistJobNames: false });
+    // Then no record can be restored with a false owner identity.
+    expect(disk.jobs).toEqual([]);
+  });
+
   test("no body reaches disk at any nesting depth", () => {
     const projected = projectSnapshot(
       snapshot([job()]),

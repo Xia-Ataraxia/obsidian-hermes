@@ -1,3 +1,37 @@
+import type { JobKey } from "./control-center";
+
+/** Parsed values and raw JSON text are memory-only; inherited values require runtime evidence. */
+export type CronAuthoredField<T> =
+  | { readonly provenance: "authored"; readonly value: T; readonly raw: string }
+  | { readonly provenance: "inherited"; readonly value: null; readonly raw: string | null }
+  | { readonly provenance: "unknown"; readonly value: null; readonly raw: string | null };
+
+export type CronExecutionMode = "agent" | "script-context" | "script-only" | "unknown";
+export interface CronExecutionDefinition {
+  readonly identity: JobKey | null;
+  readonly mode: CronExecutionMode;
+  readonly prompt: CronAuthoredField<string>;
+  readonly script: CronAuthoredField<string>;
+  readonly noAgent: CronAuthoredField<boolean>;
+  readonly workdir: CronAuthoredField<string>;
+  readonly skill: CronAuthoredField<string>;
+  readonly skills: CronAuthoredField<string | readonly string[]>;
+  /** Loader normalization after plural-over-singular selection; not session-effective skills. */
+  readonly selectedSkills: readonly string[] | null;
+  readonly skillSource: "skills" | "skill" | "none";
+  readonly toolsets: CronAuthoredField<readonly string[]>;
+  readonly executionProfile: CronAuthoredField<string>;
+  readonly model: CronAuthoredField<string>;
+  readonly provider: CronAuthoredField<string>;
+  readonly reasoning: CronAuthoredField<string>;
+  readonly delivery: CronAuthoredField<string | readonly string[]>;
+  readonly failureDelivery: CronAuthoredField<string | readonly string[]>;
+  /** Structured native schedule is retained as JSON text without guessing an effective instant. */
+  readonly schedule: CronAuthoredField<string>;
+  readonly scheduleDisplay: CronAuthoredField<string>;
+  readonly issues: readonly string[];
+}
+
 /** One Hermes profile home discovered under a server. */
 export interface ProfileRef {
   readonly alias: string;
@@ -74,6 +108,8 @@ export interface CronJobRecord {
   readonly lastDispatch: DispatchStamp | null;
   /** Memory-only body fields. */
   readonly prompt: string | null;
+  /** Absent on legacy/cache records; never included in the disk projection. */
+  readonly executionDefinition?: CronExecutionDefinition | null;
   readonly lastError: string | null;
   readonly lastDeliveryError: string | null;
   /** Native keys this build does not interpret, surfaced instead of silently dropped. */

@@ -61,7 +61,8 @@ describe("hostile home cannot reintroduce sqlite URI parameters", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) continue;
       const command = result.command.remoteCommand;
-      expect(command.startsWith("sqlite3 -readonly -json ")).toBe(true);
+      expect(command.startsWith("if test -x /opt/homebrew/opt/sqlite/bin/sqlite3; then exec /opt/homebrew/opt/sqlite/bin/sqlite3 -readonly -json ")).toBe(true);
+      expect(command.endsWith("; fi")).toBe(true);
       expect(command).not.toContain("file:");
       expect(command).not.toContain("mode=");
       expect(command).not.toContain("?immutable=1'");
@@ -70,8 +71,10 @@ describe("hostile home cannot reintroduce sqlite URI parameters", () => {
       expect(quotedArgs(command)).toEqual([
         expectedPath,
         quotedArgs(command)[1] ?? "",
+        expectedPath,
+        quotedArgs(command)[1] ?? "",
       ]);
-      expect(quotedArgs(command)).toHaveLength(2);
+      expect(quotedArgs(command)).toHaveLength(4);
     }
   });
 

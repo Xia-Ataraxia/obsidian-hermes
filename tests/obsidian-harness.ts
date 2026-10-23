@@ -2,6 +2,8 @@ import { describe, expect, mock, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import type SourcePlugin from "../src/main";
 import type { CronJobRecord } from "../src/types/hermes-cron";
 import type { PersistedSourceSnapshot, ViewerSettings } from "../src/types/snapshot";
 import type { RemoteRunner } from "../src/types/remote-command";
@@ -170,5 +172,13 @@ mock.module("obsidian", () => {
 });
 
 export const { JobDetailModal } = await import("../src/ui/job-detail-modal");
-export const PluginModule = await import("../src/main");
+const bundle = join(import.meta.dir, "../main.js");
+const bundled: unknown = createRequire(import.meta.url)(bundle);
+function isPlugin(value: unknown): value is typeof SourcePlugin {
+  return typeof value === "function" && typeof value.prototype.onload === "function";
+}
+if (typeof bundled !== "object" || bundled === null || !("default" in bundled) || !isPlugin(bundled.default)) {
+  throw new TypeError("Fresh built plugin must export an Obsidian plugin class");
+}
+export const PluginModule = { default: bundled.default };
 export const HermesCronViewerPlugin = PluginModule.default;

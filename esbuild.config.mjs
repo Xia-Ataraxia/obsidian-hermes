@@ -1,4 +1,10 @@
 import { build, context } from "esbuild";
+import { readFile, writeFile } from "node:fs/promises";
+import { prepareKanban, nativeTokenPlugin } from "./src/vendor/hermes-kanban/build.mjs";
+
+await prepareKanban();
+const styles = ["src/ui/viewer.css", "src/vendor/hermes-kanban/generated/kanban.css", "src/ui/hermes-kanban-view.css", "src/ui/hermes-profiles-view.css", "src/ui/profile-inspector.css", "src/ui/control-center.css"];
+await writeFile("styles.css", (await Promise.all(styles.map(path => readFile(path, "utf8")))).join("\n"));
 
 const watch = process.argv.includes("--watch");
 
@@ -24,6 +30,7 @@ const options = {
   sourcemap: watch ? "inline" : false,
   treeShaking: true,
   external,
+  plugins: [nativeTokenPlugin],
 };
 
 if (watch) {

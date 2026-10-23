@@ -58,13 +58,16 @@ export function buildQueryExecutions(
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
   const sql =
     `SELECT ${COLUMNS} FROM executions${where} ORDER BY claimed_at DESC, id DESC LIMIT ${options.limit}`;
+  const args = `-readonly -json ${posixSingleQuote(dbPath)} ${posixSingleQuote(sql)}`;
 
   return {
     ok: true,
     command: {
       kind: "queryExecutions",
+      // The observed Apple CLI cannot open WAL databases without sidecars. Select the existing
+      // CLI before the query; exec never retries a failed read through the other branch.
       remoteCommand:
-        `sqlite3 -readonly -json ${posixSingleQuote(dbPath)} ${posixSingleQuote(sql)}`,
+        `if test -x /opt/homebrew/opt/sqlite/bin/sqlite3; then exec /opt/homebrew/opt/sqlite/bin/sqlite3 ${args}; else exec sqlite3 ${args}; fi`,
       byteCap: BYTE_CAPS.sqlResult,
       nulSeparated: false,
     },

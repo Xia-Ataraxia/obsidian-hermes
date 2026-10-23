@@ -1,8 +1,7 @@
 import { Plugin, type App, type WorkspaceLeaf } from "obsidian";
-import { checkAlias } from "./domain/remote-token-validator";
 import type { ObsidianSettingsAccess, TargetChangeResult } from "./types/contracts";
 import { DEFAULT_SETTINGS, type ViewerSettings } from "./types/snapshot";
-import { childProcessRunner } from "./ui/child-process-runner";
+import { ControlCenterProcesses } from "./ui/control-center-processes";
 import { SshReadOnlyAdapter } from "./ui/ssh-read-only-adapter";
 import { ViewerState } from "./ui/viewer-state";
 import { TODAY_TIMELINE_VIEW, TodayTimelineView } from "./ui/today-timeline-view";
@@ -12,6 +11,10 @@ import { Logger } from "./utils/logger";
 import { RefreshScheduler } from "./ui/refresh-scheduler";
 import { SnapshotDiskStore } from "./ui/snapshot-disk-store";
 import { PluginDataGateway } from "./ui/plugin-data-gateway";
+import { ControlCenterComposition } from "./ui/control-center-composition";
+import { controlCenterDependencies } from "./ui/control-center-dependencies";
+import type { ControlCenterDependencies } from "./types/control-center-composition";
+import { ControlCenterTargets } from "./ui/control-center-targets";
 
 interface PersistedData {
   readonly settings?: Partial<ViewerSettings>;
@@ -28,6 +31,15 @@ export default class HermesCronViewerPlugin extends Plugin {
   private remoteHomes: Record<string, string> = {};
   private store!: SnapshotDiskStore;
   private data!: PluginDataGateway;
+  controlCenter?: ControlCenterComposition;
+  readonly processes = new ControlCenterProcesses();
+  readonly targets = new ControlCenterTargets({
+    settings: () => this.settings,
+    close: async alias => await this.controlCenter?.closeConnection(alias) ?? false,
+    cancel: alias => this.processes.cancel(alias),
+    save: settings => this.saveSettings(settings),
+    forget: alias => this.forgetServer(alias),
+  });
 
   override async onload(): Promise<void> {
     this.data = new PluginDataGateway(this);
@@ -35,14 +47,14 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
     this.remoteHomes = { ...(data.remoteHomes ?? {}) };
 
-    this.adapter = new SshReadOnlyAdapter({ runner: childProcessRunner });
+    this.adapter = new SshReadOnlyAdapter({ runner: this.processes.runner });
     this.state = new ViewerState(this.adapter, this.settings, this.logger);
     for (const [alias, home] of Object.entries(this.remoteHomes)) {
       this.state.rememberHome(alias, home);
     }
 
     this.store = new SnapshotDiskStore(this.data);
-    this.state.setPersistSink((snapshots) => this.store.save(snapshots));
+    this.state.setPersistSink((snapshots, isCurrent) => this.store.save(snapshots, isCurrent));
     this.state.restore(await this.store.load());
 
     this.scheduler = new RefreshScheduler(
@@ -82,16 +94,29 @@ export default class HermesCronViewerPlugin extends Plugin {
       callback: () => this.openSettings(),
     });
 
+    this.controlCenter = new ControlCenterComposition(this, this.data, () => this.settings.servers, { ...controlCenterDependencies(this.adapter), documents: this.processes.documents });
+    this.controlCenter.register();
+
     this.addSettingTab(new HermesCronSettingsTab(this.app, this));
   }
 
-  override onunload(): void {
+  override async onunload(): Promise<void> {
+    this.targets.dispose();
     this.scheduler.stop();
     this.state.bodies.clear();
+    this.state.dispose();
+    await Promise.all([this.controlCenter?.dispose(), this.processes.dispose()]);
     this.logger.info("unloaded");
   }
 
+  async configureControlCenter(dependencies: ControlCenterDependencies): Promise<void> {
+    if (!this.controlCenter) throw new TypeError("Control center is not loaded");
+    await this.controlCenter.configure(dependencies);
+  }
+
   async saveSettings(settings: ViewerSettings): Promise<void> {
+    if (!this.targets.active) return;
+    this.processes.allow(settings.servers);
     this.settings = settings;
     this.state.setSettings(settings);
     this.scheduler.setInterval(settings.autoRefreshSeconds * 1000);
@@ -107,28 +132,11 @@ export default class HermesCronViewerPlugin extends Plugin {
    * other setting are preserved.
    */
   async replaceServerTarget(previous: string, next: string): Promise<TargetChangeResult> {
-    const target = next.trim();
-    if (!checkAlias(target).ok) return { ok: false, reason: "invalid" };
-    const settings = this.settings;
-    if (!settings.servers.includes(previous)) return { ok: false, reason: "unknown" };
-    if (target === previous) return { ok: true, changed: false };
-    if (settings.servers.includes(target)) return { ok: false, reason: "duplicate" };
-
-    await this.saveSettings({
-      ...settings,
-      servers: settings.servers.map((server) => (server === previous ? target : server)),
-      selectedSources: settings.selectedSources.filter(
-        (key) => !key.startsWith(`${previous}\u0000`),
-      ),
-    });
-    await this.forgetServer(previous);
-    // Reload the surviving projection so stale in-memory snapshots for the old target disappear.
-    this.state.restore(await this.store.load());
-    return { ok: true, changed: true };
+    return this.targets.replace(previous, next);
   }
 
   rememberRemoteHome(alias: string, remoteHome: string): void {
-    if (remoteHome === "") return;
+    if (remoteHome === "" || !this.targets.active || !this.settings.servers.includes(alias)) return;
     this.remoteHomes[alias] = remoteHome;
     this.state.rememberHome(alias, remoteHome);
     void this.persist();
@@ -136,6 +144,7 @@ export default class HermesCronViewerPlugin extends Plugin {
 
   async forgetServer(alias: string): Promise<void> {
     delete this.remoteHomes[alias];
+    this.state.forgetServer(alias);
     await this.store.removeServer(alias);
     await this.persist();
   }
@@ -153,11 +162,11 @@ export default class HermesCronViewerPlugin extends Plugin {
 
   private async persist(): Promise<void> {
     // Queued through the single data owner so a concurrent snapshot save cannot be lost.
-    await this.data.update<Record<string, unknown>>((current) => ({
+    await this.data.update<Record<string, unknown>>((current) => this.targets.active ? ({
       ...current,
       settings: this.settings,
       remoteHomes: this.remoteHomes,
-    }));
+    }) : current);
   }
 
   private openSettings(): void {

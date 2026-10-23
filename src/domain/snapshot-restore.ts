@@ -40,6 +40,7 @@ export function rehydrateSnapshot(snapshot: PersistedSourceSnapshot): SourceSnap
               latenessSeconds: job.dispatchLatenessSeconds,
             },
       prompt: null,
+      executionDefinition: null,
       lastError: null,
       lastDeliveryError: null,
       unparsedFields: [],

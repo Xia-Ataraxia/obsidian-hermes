@@ -1,8 +1,6 @@
 name: Build release artifacts
 
-# Builds the plugin and checks artifact/version consistency.
-# This workflow does not run the test suite: the full suite requires a live
-# installed Obsidian and is run locally.
+# Builds and executes every manifest-listed synthetic regression. Live tests are separate.
 
 on:
   push:
@@ -13,12 +11,24 @@ permissions:
 
 jobs:
   build:
-    name: Typecheck and build
+    name: Isolated regression
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.11.14
+
+      - name: Install SQLite prerequisite
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Bootstrap owned hash-locked Python fixture
+        run: python -I scripts/qa/bootstrap-native-fixture.py --root /tmp/hermes-control-center-ci/native/python
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -28,6 +38,23 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Run enumerated isolated regressions and Python unittest
+        env:
+          HERMES_TEST_ROOT: /tmp/hermes-control-center-ci/regression
+          HERMES_TEST_PYTHON: /tmp/hermes-control-center-ci/native/python/bin/python
+        run: bun run test:isolated
+
+      - name: Retain exact test counts and command exits
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-regression-evidence
+          path: |
+            /tmp/hermes-control-center-ci/regression/run-*/evidence/
+            /tmp/hermes-control-center-ci/native/python/*receipt.json
+            /tmp/hermes-control-center-ci/native/python/fixture-environment.json
+          if-no-files-found: error
 
       - name: Verify artifacts and version consistency
         run: |

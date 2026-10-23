@@ -10,7 +10,7 @@ import type { Plugin } from "obsidian";
 export class PluginDataGateway {
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly plugin: Plugin) {}
+  constructor(private readonly plugin: Pick<Plugin, "loadData" | "saveData">) {}
 
   async read<T extends Record<string, unknown>>(): Promise<T> {
     return this.enqueue(async () => ((await this.plugin.loadData()) as T | null) ?? ({} as T));

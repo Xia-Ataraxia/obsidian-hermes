@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { renderCronExecutionDefinition } from "./cron-execution-definition-panel";
 import type { CronJobRecord } from "../types/hermes-cron";
 import type { JobTabId } from "../types/view";
 import { jobStatusView } from "../domain/run-status-view-model";
@@ -117,7 +118,8 @@ export function renderOverviewPanel(panel: HTMLElement, job: CronJobRecord): voi
     timeFact(list, "Dispatch ran", dispatch.dispatchedAt, "Not stated");
   }
 
-  renderNativeBody(panel, "Prompt", job.prompt);
+  renderCronExecutionDefinition(panel, job);
+  if (job.executionDefinition === undefined || job.executionDefinition === null) renderNativeBody(panel, "Prompt", job.prompt);
   renderNativeBody(panel, "Last error", job.lastError);
   renderNativeBody(panel, "Last delivery error", job.lastDeliveryError);
 }

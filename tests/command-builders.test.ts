@@ -28,7 +28,7 @@ const FORBIDDEN = [
 ];
 
 describe("bound command builders", () => {
-  test("all eight operations avoid forbidden shell and sqlite constructs", () => {
+  test("non-SQL read operations avoid forbidden shell and sqlite constructs", () => {
     // The canary deliberately carries `$`, a backtick and a quote *inside* its quoted literal;
     // it is asserted separately below. Every other command must be free of these tokens.
     const commands = [
@@ -38,9 +38,8 @@ describe("bound command builders", () => {
       commandOf(buildReadJobsJson(HOME)),
       commandOf(buildListOutputFiles(HOME, "job-1")),
       commandOf(buildReadOutputFile(HOME, "job-1", "2026-09-12T09:00:00.md")),
-      commandOf(buildQueryExecutions(HOME, { limit: 50 })),
     ];
-    expect(commands).toHaveLength(7);
+    expect(commands).toHaveLength(6);
     for (const command of commands) {
       for (const token of FORBIDDEN) {
         expect(command.includes(token)).toBe(false);
@@ -96,6 +95,16 @@ describe("bound command builders", () => {
 });
 
 describe("sqlite select builder", () => {
+  test("permits only the fixed executable selection before the closed query", () => {
+    const command = commandOf(buildQueryExecutions(HOME, { limit: 50 }));
+    const args = "-readonly -json '/Users/beomsu/.hermes/cron/executions.db' "
+      + "'SELECT id, job_id, status, source, claimed_at, started_at, finished_at, error, delivery_outcome, scheduled_instant FROM executions ORDER BY claimed_at DESC, id DESC LIMIT 50'";
+    expect(command).toBe(`if test -x /opt/homebrew/opt/sqlite/bin/sqlite3; then exec /opt/homebrew/opt/sqlite/bin/sqlite3 ${args}; else exec sqlite3 ${args}; fi`);
+    for (const token of FORBIDDEN.filter((token) => token !== ";")) {
+      expect(command.includes(token)).toBe(false);
+    }
+  });
+
   test("passes an absolute path and fixed -json, never a file: URI", () => {
     const command = commandOf(buildQueryExecutions(HOME, { limit: 50 }));
     expect(command).toContain("sqlite3 -readonly -json");

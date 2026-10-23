@@ -7,7 +7,7 @@ import {
   reloadFromServerPrompt,
   saveInProgressPrompt,
 } from "./discard-confirmation-modal";
-import { iconButton } from "./icon-action";
+import { renderDocumentEditor, updateDocumentActions } from "./profile-document-render";
 import { ProfileDocumentStore } from "./profile-document-store";
 type Phase = "loading" | "ready" | "failed";
 
@@ -39,9 +39,11 @@ export class ProfileDocumentModal extends Modal {
   private conflict = false;
   /** Guards against a late reply from a request that outlived the modal. */
   private closed = false;
-  /** Set once the user has confirmed losing the buffer, so `close()` may proceed. */
-  private closeApproved = false;
   private confirming = false;
+  private embeddedClose: (() => void) | null = null;
+  private confirmation: DiscardConfirmationModal | null = null;
+  private closeRequest: Promise<boolean> | null = null;
+  private revision = 0;
 
   constructor(
     app: App,
@@ -75,42 +77,84 @@ export class ProfileDocumentModal extends Modal {
    * an explicit confirmation.
    */
   override close(): void {
-    if (this.closeApproved) {
+    if (this.embeddedClose !== null) {
+      this.embeddedClose();
+      return;
+    }
+    if (!this.busy && !this.dirty) {
       super.close();
       return;
     }
-    if (this.busy) {
-      this.ask(saveInProgressPrompt(this.name), () => this.forceClose());
-      return;
-    }
-    if (!this.dirty) {
-      super.close();
-      return;
-    }
-    this.ask(discardChangesPrompt(this.name), () => this.forceClose());
+    void this.requestClose().then(allowed => { if (allowed && !this.closed) super.close(); });
   }
 
   override onClose(): void {
     this.closed = true;
+    this.revision += 1;
+    this.confirmation?.close();
+    this.confirmation = null;
+    this.buffer = "";
+    this.baseline = "";
+    this.version = null;
+    this.resolvedPath = "";
+    this.message = null;
+    this.embeddedClose = null;
+    for (const editor of Array.from(this.contentEl.querySelectorAll("textarea"))) editor.value = "";
     this.contentEl.empty();
   }
 
-  private forceClose(): void {
-    this.closeApproved = true;
-    this.close();
+  /** Use the same editor and save checks inside a leaf; never open a global modal. */
+  async mount(container: HTMLElement, onClose: () => void): Promise<void> {
+    this.embeddedClose = onClose;
+    container.append(this.contentEl);
+    await this.onOpen();
+  }
+
+  requestClose(): Promise<boolean> {
+    if (this.closed || !this.busy && !this.dirty) return Promise.resolve(true);
+    if (this.confirming) return Promise.resolve(false);
+    if (this.closeRequest !== null) return this.closeRequest;
+    this.closeRequest = new Promise<boolean>(resolve => {
+      this.confirmation = new DiscardConfirmationModal(this.app, this.busy ? saveInProgressPrompt(this.name) : discardChangesPrompt(this.name), resolve);
+      this.confirmation.open();
+    }).finally(() => { this.closeRequest = null; this.confirmation = null; });
+    return this.closeRequest;
+  }
+
+  dispose(): void {
+    this.onClose();
+    this.contentEl.remove();
+  }
+
+  /** Observe external changes without replacing the editor, selection or its buffer. */
+  async refresh(): Promise<void> {
+    if (this.closed || this.busy || this.phase !== "ready") return;
+    const revision = ++this.revision;
+    const result = await this.store.read(this.profile, this.name);
+    if (this.closed || this.busy || revision !== this.revision) return;
+    if (!result.ok) this.message = `Could not refresh ${this.name} (${result.code}). Your text is kept.`;
+    else if (result.value.version !== this.version || result.value.resolvedPath !== this.resolvedPath) {
+      this.conflict = true;
+      this.message = `${this.name} changed on the server. Your text is kept here; reload to see the server copy.`;
+    } else return;
+    const message = this.contentEl.querySelector<HTMLElement>("[data-document-message]");
+    if (message !== null) { message.hidden = false; message.textContent = this.message; message.className = "hcv-doc-error"; }
   }
 
   /** Open one confirmation at a time; `onConfirmed` runs only on an explicit yes. */
   private ask(spec: ConfirmationSpec, onConfirmed: () => void): void {
     if (this.confirming) return;
     this.confirming = true;
-    new DiscardConfirmationModal(this.app, spec, (confirmed) => {
+    this.confirmation = new DiscardConfirmationModal(this.app, spec, (confirmed) => {
       this.confirming = false;
-      if (confirmed) onConfirmed();
-    }).open();
+      this.confirmation = null;
+      if (confirmed && !this.closed) onConfirmed();
+    });
+    this.confirmation.open();
   }
 
   private async load(): Promise<void> {
+    this.revision += 1;
     this.busy = true;
     this.render();
     const result = await this.store.read(this.profile, this.name);
@@ -136,6 +180,7 @@ export class ProfileDocumentModal extends Modal {
 
   private async save(): Promise<void> {
     if (!this.savable) return;
+    this.revision += 1;
     this.busy = true;
     this.message = null;
     this.render();
@@ -171,64 +216,14 @@ export class ProfileDocumentModal extends Modal {
   }
 
   private render(): void {
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("hcv-doc");
-
-    const header = root.createDiv({ cls: "hcv-doc-header" });
-    const heading = header.createDiv({ cls: "hcv-doc-heading" });
-    heading.createEl("h2", { cls: "hcv-doc-title", text: this.name });
-    heading.createSpan({
-      cls: "hcv-doc-subject",
-      text: `${this.profile.alias} / ${this.profile.profileId} - ${this.profile.home}`,
+    renderDocumentEditor(this.contentEl, {
+      profile: this.profile, name: this.name, phase: this.phase, message: this.message,
+      conflict: this.conflict, resolvedPath: this.resolvedPath, buffer: this.buffer,
+      busy: this.busy, savable: this.savable, stateLabel: this.stateLabel,
+    }, {
+      reload: () => this.reloadFromServer(), retry: () => void this.load(), save: () => void this.save(),
+      close: () => this.close(), input: value => { this.buffer = value; this.updateActionState(); },
     });
-    // The actual file, which for `USER.md` may resolve through a `memories` symlink. Quiet
-    // metadata only: the path is not the document body and is never logged.
-    if (this.resolvedPath !== "") {
-      heading.createSpan({
-        cls: "hcv-doc-subject hcv-doc-path",
-        text: this.resolvedPath,
-        attr: { title: this.resolvedPath },
-      });
-    }
-    iconButton(header, "refresh-cw", `Reload ${this.name} from the server`, () => this.reloadFromServer());
-
-    if (this.phase === "loading") {
-      root.createEl("p", { cls: "hcv-doc-status", text: `Loading ${this.name}...` });
-      return;
-    }
-
-    if (this.message !== null) {
-      root.createEl("p", {
-        cls: this.conflict || this.phase === "failed" ? "hcv-doc-error" : "hcv-doc-status",
-        text: this.message,
-      });
-    }
-
-    if (this.phase === "failed") {
-      const actions = root.createDiv({ cls: "hcv-doc-actions" });
-      iconButton(actions, "rotate-ccw", "Try reading the document again", () => void this.load());
-      iconButton(actions, "x", "Close", () => this.close());
-      return;
-    }
-
-    const editor = root.createEl("textarea", {
-      cls: "hcv-doc-editor",
-      attr: { "aria-label": `${this.name} contents`, spellcheck: "false" },
-    });
-    editor.value = this.buffer;
-    editor.disabled = this.busy;
-    editor.addEventListener("input", () => {
-      this.buffer = editor.value;
-      this.updateActionState();
-    });
-
-    const actions = root.createDiv({ cls: "hcv-doc-actions" });
-    actions.createSpan({ cls: "hcv-doc-dirty", text: this.stateLabel });
-    const save = iconButton(actions, "save", `Save ${this.name}`, () => void this.save());
-    save.addClass("hcv-doc-save");
-    save.disabled = !this.savable;
-    iconButton(actions, "x", "Cancel and close", () => this.close());
   }
 
   private get stateLabel(): string {
@@ -239,9 +234,6 @@ export class ProfileDocumentModal extends Modal {
 
   /** Keep the dirty indicator and Save availability current without rebuilding the editor. */
   private updateActionState(): void {
-    const save = this.contentEl.querySelector<HTMLButtonElement>(".hcv-doc-save");
-    if (save !== null) save.disabled = !this.savable;
-    const flag = this.contentEl.querySelector<HTMLElement>(".hcv-doc-dirty");
-    if (flag !== null) flag.textContent = this.stateLabel;
+    updateDocumentActions(this.contentEl, this.savable, this.stateLabel);
   }
 }

@@ -1,6 +1,7 @@
 import type { CronJobRecord, JobStatusToken, JobsReadResult, SourceKey } from "../types/hermes-cron";
 import { asBoolean, asInteger, asRecord, asStrictString as asString } from "./json-scalars";
 import { readScheduleDisplay } from "./schedule-display-reader";
+import { parseCronExecutionDefinition } from "./cron-execution-definition";
 
 const KNOWN_STATUS: readonly string[] = ["ok", "error", "delivery_queued", "delivery_failed"];
 
@@ -87,9 +88,10 @@ function parseJob(source: SourceKey, row: unknown, unparsed: Set<string>): CronJ
       latenessSeconds: asInteger(dispatch["lateness_seconds"]),
     },
     prompt: asString(record["prompt"]),
+    executionDefinition: parseCronExecutionDefinition(source, record),
     lastError: asString(record["last_error"]),
     lastDeliveryError: asString(record["last_delivery_error"]),
-    unparsedFields: [],
+    unparsedFields: Object.keys(record).filter((key) => !KNOWN_KEYS.has(key)).sort(),
   };
 }
 
@@ -100,6 +102,7 @@ function parseJob(source: SourceKey, row: unknown, unparsed: Set<string>): CronJ
  * schema mismatch shows up in the UI instead of silently blanking the view.
  */
 export function parseJobsJson(source: SourceKey, parsed: unknown): JobsReadResult {
+  if (source.profileId === "all") return { jobs: [], unparsedFields: [], recognized: false };
   const unparsed = new Set<string>();
   const jobs: CronJobRecord[] = [];
   const { rows, recognized } = toJobRows(parsed);

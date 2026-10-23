@@ -6,7 +6,7 @@ import type {
   SourceSnapshot,
   ViewerSettings,
 } from "../types/snapshot";
-import { decodeSourceKey, encodeSourceKey } from "../types/snapshot";
+import { encodeSourceKey } from "../types/snapshot";
 import { collectRound } from "./hermes-snapshot-collector";
 import type { SshReadOnlyAdapter } from "./ssh-read-only-adapter";
 import { VerbatimMemoryStore } from "./verbatim-memory-store";
@@ -15,7 +15,7 @@ import { rehydrateSnapshot } from "../domain/snapshot-restore";
 import { isUsableRead } from "../domain/read-usability";
 import { SourceStatusTracker } from "./source-status-tracker";
 import type { ViewerFilter } from "../types/view";
-import { profileHome } from "../domain/profile-candidate-paths";
+import { selectedProfileRefs, selectedProfileFor } from "../domain/viewer-selected-profiles";
 import type { Logger } from "../utils/logger";
 import { emptyCounters } from "../utils/logger";
 
@@ -34,9 +34,11 @@ export class ViewerState {
   private readonly listeners = new Set<Listener>();
   private filter: ViewerFilter = EMPTY_FILTER;
   private refreshing = false;
+  private generation = 0;
+  private disposed = false;
   private remoteHomes = new Map<string, string>();
   private readonly status = new SourceStatusTracker();
-  private persist: ((snapshots: readonly PersistedSourceSnapshot[]) => Promise<void>) | null = null;
+  private persist: ((snapshots: readonly PersistedSourceSnapshot[], isCurrent: () => boolean) => Promise<void>) | null = null;
 
   /** Bodies live here for the process lifetime only; nothing is written to disk. */
   readonly bodies = new VerbatimMemoryStore();
@@ -50,7 +52,7 @@ export class ViewerState {
   ) {}
 
   /** Install the disk projection sink. Bodies never reach it: the projection drops them. */
-  setPersistSink(sink: (snapshots: readonly PersistedSourceSnapshot[]) => Promise<void>): void {
+  setPersistSink(sink: (snapshots: readonly PersistedSourceSnapshot[], isCurrent: () => boolean) => Promise<void>): void {
     this.persist = sink;
   }
 
@@ -104,6 +106,10 @@ export class ViewerState {
   }
 
   setSettings(settings: ViewerSettings): void {
+    if (JSON.stringify([settings.servers, settings.selectedSources]) !== JSON.stringify([this.settings.servers, this.settings.selectedSources])) {
+      this.generation += 1;
+      this.refreshing = false;
+    }
     this.settings = settings;
     this.notifyAll();
   }
@@ -120,21 +126,16 @@ export class ViewerState {
   getRemoteHome(alias: string): string | undefined {
     return this.remoteHomes.get(alias);
   }
+  forgetServer(alias: string): void {
+    this.remoteHomes.delete(alias);
+    this.status.forget(alias);
+    this.snapshots = this.snapshots.filter(snapshot => snapshot.source.alias !== alias);
+    this.notifyAll();
+  }
 
   /** Selected sources resolved back into concrete profile references. */
   selectedProfiles(): readonly ProfileRef[] {
-    const profiles: ProfileRef[] = [];
-    for (const encoded of this.settings.selectedSources) {
-      const key = decodeSourceKey(encoded);
-      const remoteHome = this.remoteHomes.get(key.alias);
-      if (remoteHome === undefined) continue;
-      profiles.push({
-        alias: key.alias,
-        profileId: key.profileId,
-        home: profileHome(remoteHome, key.profileId),
-      });
-    }
-    return profiles;
+    return selectedProfileRefs(this.settings.selectedSources, this.remoteHomes);
   }
 
   /** Snapshots matching the active server/profile filter. */
@@ -159,7 +160,9 @@ export class ViewerState {
 
   /** Run one collection round for every selected source. Never throws to the caller. */
   async refresh(): Promise<void> {
-    if (this.refreshing) return;
+    if (this.refreshing || this.disposed) return;
+    const generation = this.generation;
+    const isCurrent = () => !this.disposed && generation === this.generation;
     const profiles = this.selectedProfiles();
     if (profiles.length === 0) {
       this.snapshots = [];
@@ -175,6 +178,7 @@ export class ViewerState {
       const collected = await collectRound(this.adapter, profiles, {
         historyLimit: this.settings.historyLimit,
       });
+      if (!isCurrent()) return;
       // A failed source keeps its last successful content; only a successful read replaces it.
       const previousByKey = new Map(
         this.snapshots.map((snapshot) => [encodeSourceKey(snapshot.source), snapshot]),
@@ -200,6 +204,7 @@ export class ViewerState {
                 persistJobNames: this.settings.persistJobNames,
               }),
             ),
+          isCurrent,
         );
       }
       counters.sources = collected.length;
@@ -212,22 +217,33 @@ export class ViewerState {
       counters.ledgerUnavailable = collected.filter((item) => item.ledger.status !== "read").length;
       counters.commands = collected.length * 3;
     } finally {
-      counters.durationMs = Date.now() - startedAt;
-      this.refreshing = false;
-      this.logger.round(counters);
-      this.notifyAll();
+      if (isCurrent()) {
+        counters.durationMs = Date.now() - startedAt;
+        this.refreshing = false;
+        this.logger.round(counters);
+        this.notifyAll();
+      }
     }
   }
 
   /** Resolve the profile reference backing a snapshot source, for on-demand reads. */
   profileFor(key: SourceKey): ProfileRef | undefined {
-    return this.selectedProfiles().find(
-      (profile) => profile.alias === key.alias && profile.profileId === key.profileId,
-    );
+    return selectedProfileFor(this.settings.selectedSources, this.remoteHomes, key);
   }
 
   /** Encoded keys of every source currently held. */
   sourceKeys(): readonly string[] {
     return this.snapshots.map((snapshot) => encodeSourceKey(snapshot.source));
+  }
+  dispose(): void {
+    this.disposed = true;
+    this.generation += 1;
+    this.refreshing = false;
+    this.persist = null;
+    this.listeners.clear();
+    this.snapshots = [];
+    this.remoteHomes.clear();
+    this.status.clear();
+    this.bodies.clear();
   }
 }

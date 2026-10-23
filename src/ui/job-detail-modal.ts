@@ -4,6 +4,7 @@ import type { LedgerReadResult } from "../types/snapshot";
 import { buildListOutputFiles } from "../domain/read-command-builder";
 import { buildOutputFileIndex } from "../domain/output-file-index";
 import { splitNulRecords } from "../domain/response-bound";
+import { matchesCronProfile } from "../domain/cron-execution-definition";
 import { readExecutionHistory } from "./execution-history-reader";
 import type { HistoryCursor, JobTabId } from "../types/view";
 import { renderLedgerPanel, renderOutputPanel } from "./job-evidence-panels";
@@ -48,6 +49,7 @@ export class JobDetailModal extends Modal {
     const modal = this.modalEl as HTMLElement | undefined;
     modal?.addClass("hcv-detail-modal");
     this.render();
+    if (!matchesCronProfile(this.job, this.profile)) return;
     await this.loadEvidence();
     this.loading = false;
     this.render();
@@ -124,6 +126,10 @@ export class JobDetailModal extends Modal {
     const root = this.contentEl;
     root.empty();
     root.addClass("hcv-detail");
+    if (!matchesCronProfile(this.job, this.profile)) {
+      root.createEl("p", { text: "Owner mismatch; job details and evidence withheld." });
+      return;
+    }
 
     const header = root.createDiv({ cls: "hcv-detail-header" });
     header.createEl("h2", { cls: "hcv-detail-title", text: this.job.name ?? this.job.id });

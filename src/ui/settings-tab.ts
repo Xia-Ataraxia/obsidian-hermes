@@ -9,6 +9,8 @@ import { ProfileDocumentModal } from "./profile-document-modal";
 import { discoverProfiles } from "./profile-discovery-runner";
 import { renderProfileSection } from "./profile-settings-section";
 import { renderServerSection } from "./server-settings-section";
+import { HERMES_KANBAN_VIEW } from "./hermes-kanban-view";
+import { HERMES_PROFILES_VIEW } from "./hermes-profiles-view";
 
 /** Actionable reason per transport failure, so the user knows what to fix outside the plugin. */
 const TRANSPORT_DETAIL: Record<TransportStatus, string> = {
@@ -68,6 +70,12 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       onCheck: (alias) => void this.checkConnection(alias),
       onRemove: (alias) => void this.removeServer(alias),
     });
+    for (const alias of this.plugin.settings.servers) {
+      new Setting(containerEl).setName(`Hermes control center · ${alias}`)
+        .setDesc("Native Kanban task edits; profile skills and cron are read-only. Live freshness appears in each view.")
+        .addButton(button => button.setButtonText("Kanban").onClick(() => { void this.plugin.controlCenter?.open(HERMES_KANBAN_VIEW, alias); }))
+        .addButton(button => button.setButtonText("Profiles").onClick(() => { void this.plugin.controlCenter?.open(HERMES_PROFILES_VIEW, alias); }));
+    }
 
     new Setting(containerEl).setName("Profiles").setHeading();
     this.renderProfiles(containerEl);
@@ -89,7 +97,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       this.app,
       alias,
       (target) => this.plugin.replaceServerTarget(alias, target),
-      () => this.forgetLocalRow(alias),
+      () => { this.forgetLocalRow(alias); for (const next of this.plugin.settings.servers) if (!this.discovered.has(next)) void this.checkConnection(next); },
     ).open();
   }
 
@@ -102,11 +110,13 @@ export class HermesCronSettingsTab extends PluginSettingTab {
 
   private async checkConnection(alias: string): Promise<void> {
     if (this.pending.has(alias)) return;
+    const generation = this.plugin.targets.generation(alias);
     this.pending.add(alias);
     this.status.set(alias, "Connecting...");
     this.display();
     try {
       const result = await discoverProfiles(this.plugin.adapter, alias);
+      if (!this.plugin.settings.servers.includes(alias) || generation !== this.plugin.targets.generation(alias)) return;
       if (result.transport !== "connected") {
         this.status.set(alias, TRANSPORT_DETAIL[result.transport]);
         return;
@@ -116,7 +126,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       // rememberRemoteHome also seeds the in-memory state, so selected sources rebuild offline.
       this.plugin.rememberRemoteHome(alias, result.profiles[0]?.home.replace(/\/\.hermes$/, "") ?? "");
     } catch {
-      this.status.set(alias, "Connection check failed. Verify `ssh <alias>` in a terminal first.");
+      if (generation === this.plugin.targets.generation(alias) && this.plugin.settings.servers.includes(alias)) this.status.set(alias, "Connection check failed. Verify `ssh <alias>` in a terminal first.");
     } finally {
       this.pending.delete(alias);
       this.display();
@@ -124,16 +134,9 @@ export class HermesCronSettingsTab extends PluginSettingTab {
   }
 
   private async removeServer(alias: string): Promise<void> {
-    const settings = this.plugin.settings;
-    const kept = settings.selectedSources.filter((key) => !key.startsWith(`${alias}\u0000`));
+    if (!(await this.plugin.targets.remove(alias)).ok) return;
     this.discovered.delete(alias);
     this.status.delete(alias);
-    await this.plugin.saveSettings({
-      ...settings,
-      servers: settings.servers.filter((candidate) => candidate !== alias),
-      selectedSources: kept,
-    });
-    await this.plugin.forgetServer(alias);
     this.display();
   }
 
@@ -147,7 +150,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       isSelected: (profile) => this.plugin.settings.selectedSources.includes(keyOf(profile)),
       onToggle: (profile, selected) => this.toggleProfile(profile, selected),
       // Opens the editor only; nothing is written until the user saves inside the modal.
-      onEditDocument: (profile, name) => new ProfileDocumentModal(this.app, profile, name).open(),
+      onEditDocument: (profile, name) => new ProfileDocumentModal(this.app, profile, name, this.plugin.processes.documents).open(),
     });
     if (rendered === 0) note(parent, "No profile known yet. Check a server to list its profiles.");
   }

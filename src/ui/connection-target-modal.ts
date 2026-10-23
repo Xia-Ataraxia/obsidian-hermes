@@ -5,6 +5,7 @@ import type { TargetChangeResult } from "../types/contracts";
 export function describeTargetFailure(reason: Exclude<TargetChangeResult, { ok: true }>["reason"]): string {
   if (reason === "invalid") return "Use 1-64 characters: letters, digits, dot, underscore or hyphen.";
   if (reason === "duplicate") return "That SSH target is already registered.";
+  if (reason === "cancelled") return "Target change cancelled. Your open edits are still available.";
   return "This server is no longer registered. Close this dialog and reopen settings.";
 }
 

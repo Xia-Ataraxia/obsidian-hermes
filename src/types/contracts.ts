@@ -50,7 +50,7 @@ export interface ServerSectionOptions {
 /** Outcome of a connection target replacement; `changed: false` means the target was identical. */
 export type TargetChangeResult =
   | { readonly ok: true; readonly changed: boolean }
-  | { readonly ok: false; readonly reason: "invalid" | "duplicate" | "unknown" };
+  | { readonly ok: false; readonly reason: "invalid" | "duplicate" | "unknown" | "cancelled" };
 
 /** Outcome of a native timestamp resolution. */
 export type ResolvedInstant =

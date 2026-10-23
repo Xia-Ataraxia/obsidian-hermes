@@ -1,6 +1,7 @@
 import type { ExecutionRow } from "../types/hermes-cron";
 import type { PersistedExecution, PersistedJob, PersistedSourceSnapshot, SourceSnapshot } from "../types/snapshot";
 import type { ProjectionOptions } from "../types/contracts";
+import { matchesCronOwner } from "./cron-execution-definition";
 
 /** Hard caps so one source cannot grow the on-disk store without bound. */
 export const PROJECTION_LIMITS = {
@@ -21,7 +22,9 @@ export function projectSnapshot(
   outputFileNames: readonly string[],
   options: ProjectionOptions,
 ): PersistedSourceSnapshot {
-  const jobs: PersistedJob[] = snapshot.jobs.slice(0, PROJECTION_LIMITS.jobs).map((job) => ({
+  // Owner mismatches cannot be relabelled as this source during rehydration. Definitions stay in memory.
+  const jobs: PersistedJob[] = snapshot.jobs.filter((job) => matchesCronOwner(job, snapshot.source))
+    .slice(0, PROJECTION_LIMITS.jobs).map((job) => ({
     id: job.id,
     name: options.persistJobNames ? job.name : null,
     scheduleKind: job.schedule.kind,

@@ -1,3 +1,4 @@
+import { testPython } from "./isolated-environment";
 import { describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import {
@@ -26,7 +27,7 @@ import { ProfileDocumentStore } from "../src/ui/profile-document-store";
  */
 function localInvoke(stdin: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("python3", ["-c", REMOTE_DOCUMENT_SCRIPT], { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(testPython(), ["-I", "-B", "-c", REMOTE_DOCUMENT_SCRIPT], { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));

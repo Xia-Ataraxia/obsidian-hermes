@@ -26,11 +26,11 @@ export class SnapshotDiskStore {
   }
 
   /** Replace the snapshot for each given source; unrelated sources are untouched. */
-  async save(snapshots: readonly PersistedSourceSnapshot[]): Promise<void> {
+  async save(snapshots: readonly PersistedSourceSnapshot[], isCurrent: () => boolean = () => true): Promise<void> {
     const incomingKeys = new Set(
       snapshots.map((snapshot) => `${snapshot.alias}\u0000${snapshot.profileId}`),
     );
-    await this.write((existing) => [
+    await this.write((existing) => !isCurrent() ? existing : [
       ...existing.filter(
         (snapshot) => !incomingKeys.has(`${snapshot.alias}\u0000${snapshot.profileId}`),
       ),

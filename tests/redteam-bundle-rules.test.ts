@@ -1,3 +1,4 @@
+import { buildQueryExecutions } from "../src/domain/sqlite-select-builder";
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ function logicLoc(text: string): number {
 }
 
 describe("built bundle mutation surface (AC12 / AC21)", () => {
-  test("main.js contains no cron mutation, hermes CLI, URI sqlite, or weakened host-key options", () => {
+  test("main.js contains no cron mutation, hermes CLI, cron URI sqlite, or weakened host-key options", () => {
     const source = readFileSync(BUNDLE, "utf8");
     for (const forbidden of [
       "hermes cron",
@@ -59,7 +60,14 @@ describe("built bundle mutation surface (AC12 / AC21)", () => {
     ]) {
       expect(source.includes(forbidden)).toBe(false);
     }
-    expect(SQLITE_FILE_URI.test(source)).toBe(false);
+    // Native activity uses a closed read-only URI. The cron shell reader must never accept one.
+    const cronRead = buildQueryExecutions("/synthetic/hermes", { limit: 50 });
+    if (!cronRead.ok) throw new TypeError("Synthetic read command refused");
+    expect(SQLITE_FILE_URI.test(cronRead.command.remoteCommand)).toBe(false);
+    expect(cronRead.command.remoteCommand).toStartWith("sqlite3 -readonly -json '/synthetic/hermes/cron/executions.db'");
+    for (const home of ["file:/tmp/a", "file:relative?mode=rw", "file::memory:"]) {
+      expect(buildQueryExecutions(home, { limit: 50 }).ok).toBe(false);
+    }
     expect(source).toContain("sqlite3 -readonly -json");
     expect(source).toContain("StrictHostKeyChecking=yes");
   });
@@ -116,12 +124,12 @@ describe("built bundle mutation surface (AC12 / AC21)", () => {
       manifest: unknown,
     ) => { onload: () => Promise<void> };
     await new Plugin({ workspace: {} }, { id: "hermes-cron-viewer" }).onload();
-    expect(commands.sort()).toEqual(["open-settings", "open-today-timeline", "open-week-calendar", "refresh-now"]);
+    expect(commands.sort()).toEqual(["open-hermes-kanban", "open-hermes-profiles", "open-settings", "open-today-timeline", "open-week-calendar", "refresh-now"]);
     expect(commands.some((id) => /create|delete|pause|resume|run/.test(id))).toBe(false);
   });
 
   test("runtime sources stay inside 200 LOC, with no innerHTML, .obsidian literal, or hardcoded colors", () => {
-    const files = walk(SRC).filter((path) => path.endsWith(".ts"));
+    const files = walk(SRC).filter((path) => /\.tsx?$/.test(path));
     const over: string[] = [];
     const hits: string[] = [];
     for (const path of files) {
