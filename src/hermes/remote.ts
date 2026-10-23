@@ -46,8 +46,11 @@ export function parseSections(stdout: string): Sections {
   return sections;
 }
 
+// Tailscale SSH reports exit 0 for every command, so the script prints its own status last.
+const STATUS = /\u001e\?(\d+)\n?$/;
+
 export async function runScript(adapter: SshReadOnlyAdapter, alias: string, script: string, byteCap = 4 * 1024 * 1024): Promise<RemoteResult> {
-  const encoded = Buffer.from(PRELUDE + script, "utf8").toString("base64");
+  const encoded = Buffer.from(`${PRELUDE}(\n${script}\n)\nprintf '\\036?%s\\n' "$?"\n`, "utf8").toString("base64");
   const outcome = await adapter.run(alias, {
     kind: "hermes",
     remoteCommand: `sh -c "$(printf %s ${encoded} | base64 -d)"`,
@@ -56,8 +59,11 @@ export async function runScript(adapter: SshReadOnlyAdapter, alias: string, scri
   });
   if (outcome.transport !== "connected") return { ok: false, transport: outcome.transport, message: outcome.stderr.trim() || outcome.transport };
   if (outcome.capExceeded) return { ok: false, transport: "connected", message: "Response too large" };
-  if (outcome.exitCode !== 0) return { ok: false, transport: "connected", message: outcome.stderr.trim().split("\n").pop() || `Exit ${outcome.exitCode}` };
-  return { ok: true, sections: parseSections(outcome.stdout) };
+  const status = STATUS.exec(outcome.stdout);
+  // ponytail: no status line (a fake adapter, or a remote shell killed outright) falls back to ssh's code.
+  const code = status ? Number(status[1]) : outcome.exitCode;
+  if (code !== 0) return { ok: false, transport: "connected", message: outcome.stderr.trim().split("\n").pop() || `Exit ${code}` };
+  return { ok: true, sections: parseSections(status ? outcome.stdout.slice(0, status.index) : outcome.stdout) };
 }
 
 export function json<T>(text: string | undefined, fallback: T): T {

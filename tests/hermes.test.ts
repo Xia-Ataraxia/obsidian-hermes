@@ -62,6 +62,8 @@ test("model catalog parses and setModel writes provider then model via the CLI",
   expect((await client.setModel("h", "xia", "--help", "p")).ok).toBe(false);
   expect((await client.setModel("h", "xia", "m", "-p")).ok).toBe(false);
   expect(sent.length).toBe(count);
+  const failed = { run: async () => ({ transport: "connected", exitCode: 0, stdout: "\u001eok\n\u001e?3\n", stderr: "warn\nno such model", capExceeded: false }) } as never;
+  expect(await new HermesClient(failed).setModel("h", "xia", "m", "p")).toEqual({ ok: false, message: "no such model" });
 });
 
 test("dropMove maps lanes to CLI verbs", () => {
