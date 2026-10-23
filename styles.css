@@ -1216,6 +1216,7 @@
   color: var(--text-muted);
 }
 .hm-empty-icon svg { width: 36px; height: 36px; opacity: 0.4; }
+.hm-empty-icon .lucide-loader { animation: hm-spin 0.9s linear infinite; }
 
 /* ═════════════ Profiles canvas ═════════════ */
 
@@ -1518,6 +1519,7 @@
 }
 .hm-lane.is-triage { --c: var(--color-yellow); }
 .hm-lane.is-todo { --c: var(--text-muted); }
+.hm-lane.is-scheduled { --c: var(--color-orange); }
 .hm-lane.is-ready { --c: var(--color-cyan); }
 .hm-lane.is-running { --c: var(--color-blue); }
 .hm-lane.is-blocked { --c: var(--hm-bad); }
@@ -1586,6 +1588,7 @@
 .hm-status.is-review { color: var(--color-purple); }
 .hm-status.is-ready { color: var(--color-cyan); }
 .hm-status.is-triage { color: var(--color-yellow); }
+.hm-status.is-scheduled { color: var(--color-orange); }
 .hm-drawer.is-task .hm-drawer-meta { padding-bottom: 10px; }
 .hm-task-bar { display: flex; align-items: center; gap: 8px; padding: 0 16px 12px; }
 .hm-task-bar select { height: 28px; font-size: 12px; }

@@ -131,7 +131,8 @@ export abstract class HermesView extends ItemView {
       if (!document.hidden && this.contentEl.isShown() && !this.busy()) void this.reload(true);
     }, this.pollMs));
     this.registerInterval(window.setInterval(() => this.tick(), 15_000));
-    await this.reload();
+    // Not awaited: Obsidian holds the tab blank (and its saved state) until onOpen resolves.
+    void this.reload();
   }
 
   private buildToolbar(): void {
@@ -161,9 +162,10 @@ export abstract class HermesView extends ItemView {
       if (!this.alias) return this.empty("server", "No SSH host", "Settings", () => this.host.openSettings());
     }
     this.refreshButton.addClass("is-spinning");
+    if (!quiet && !this.loadedAt) this.empty("loader", "Loading…");
     const alias = this.alias;
     this.inflight = (async () => {
-      const error = await this.pull(alias);
+      const error = await this.pull(alias).catch((e: unknown) => e instanceof Error ? e.message : String(e));
       if (alias !== this.alias) return;
       if (error !== null) {
         if (!quiet || this.loadedAt === 0) this.empty("wifi-off", error, "Retry", () => void this.reload());
@@ -175,7 +177,10 @@ export abstract class HermesView extends ItemView {
       this.stamp.removeClass("is-stale");
       this.tick();
       if (!this.busy()) this.render();
-    })().finally(() => {
+    })().catch((e: unknown) => {
+      console.error(e);
+      this.empty("triangle-alert", e instanceof Error ? e.message : String(e), "Retry", () => void this.reload());
+    }).finally(() => {
       this.inflight = null;
       this.refreshButton.removeClass("is-spinning");
       if (this.again) { this.again = false; void this.reload(); }

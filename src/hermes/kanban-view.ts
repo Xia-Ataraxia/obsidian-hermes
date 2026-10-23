@@ -7,6 +7,7 @@ export const KANBAN_VIEW = "hermes-kanban";
 const COLUMNS: Record<Column, [string, string]> = {
   triage: ["inbox", "Triage"],
   todo: ["circle-dashed", "Todo"],
+  scheduled: ["clock", "Scheduled"],
   ready: ["circle-dot", "Ready"],
   running: ["play", "Running"],
   blocked: ["ban", "Blocked"],
@@ -112,11 +113,15 @@ export class KanbanView extends HermesView {
     this.body.empty();
     const board = this.current;
     if (!board) return this.empty("square-kanban", "No boards");
+    const columns = STATUSES.map(status => [status, board.tasks.filter(task => task.status === status && this.visible(task))
+      .sort((a, b) => b.priority - a.priority || (status === "done" ? (b.completedAt ?? 0) - (a.completedAt ?? 0) : b.createdAt - a.createdAt))] as const);
+    if (columns.every(([, tasks]) => tasks.length === 0)) {
+      if (this.query.trim() || this.assignee) return this.empty("search", "No matching tasks");
+      return this.empty("square-kanban", "No tasks", "New task", () => this.newTask());
+    }
     const lanes = this.body.createDiv("hm-lanes");
     const now = Date.now() / 1000;
-    for (const status of STATUSES) {
-      const tasks = board.tasks.filter(task => task.status === status && this.visible(task))
-        .sort((a, b) => b.priority - a.priority || (status === "done" ? (b.completedAt ?? 0) - (a.completedAt ?? 0) : b.createdAt - a.createdAt));
+    for (const [status, tasks] of columns) {
       const [iconName, label] = COLUMNS[status];
       const lane = lanes.createDiv({ cls: `hm-lane is-${status}${tasks.length === 0 ? " is-empty" : ""}`, attr: { "data-status": status } });
       const head = lane.createDiv("hm-lane-head");

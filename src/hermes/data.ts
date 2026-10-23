@@ -202,8 +202,8 @@ function profileDir(id: string): string {
 
 /* ───────────────────────── Kanban ───────────────────────── */
 
-export const STATUSES = ["triage", "todo", "ready", "running", "blocked", "review", "done"] as const;
-export type Status = typeof STATUSES[number] | "scheduled" | "archived";
+export const STATUSES = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"] as const;
+export type Status = typeof STATUSES[number] | "archived";
 
 export interface Task {
   readonly id: string; readonly board: string; readonly title: string; readonly assignee: string | null;
@@ -227,7 +227,7 @@ for db in "$H/kanban.db" "$H"/kanban/boards/*/kanban.db; do
   case "$slug" in _*|*[!A-Za-z0-9_.-]*) continue;; esac
   [ "$slug" = default ] || { S "meta $slug"; cat "$dir/board.json" 2>/dev/null; }
   S "tasks $slug"
-  ro "$db" <<'SQL'
+  ro "$db" <<'SQL' || printf '[]\n'
 select json_group_array(json_object('id',id,'title',title,'assignee',assignee,'status',status,'priority',coalesce(priority,0),
   'createdBy',created_by,'createdAt',created_at,'startedAt',started_at,'completedAt',completed_at,'block',block_kind,
   'comments',(select count(*) from task_comments c where c.task_id=t.id),
