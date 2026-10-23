@@ -1,13 +1,10 @@
-import { Setting, setIcon } from "obsidian";
+import { Setting } from "obsidian";
 import type { ProfileRef } from "../types/hermes-cron";
 import type { ProfileSectionOptions } from "../types/contracts";
-import type { ProfileDocumentName } from "../types/profile-document";
-import { EDITABLE_DOCUMENT_NAMES } from "../types/profile-document";
 
 /**
  * Render the profile section: one heading per server, then its profile rows.
  *
- * Kept apart from the settings tab so the toggle plus document-action widget group exists once.
  * Returns the number of rows rendered so the caller can show an empty-state note instead.
  */
 export function renderProfileSection(parent: HTMLElement, options: ProfileSectionOptions): number {
@@ -44,10 +41,6 @@ function renderProfileRow(
   options: ProfileSectionOptions,
 ): void {
   const row = new Setting(parent).setName(profile.profileId).setDesc(profile.home);
-
-  // Edit buttons first so the two related actions sit together, left of the rightmost toggle.
-  for (const name of EDITABLE_DOCUMENT_NAMES) addEditButton(row, profile, name, options);
-
   row.addToggle((toggle) =>
     toggle
       .setValue(options.isSelected(profile))
@@ -56,26 +49,3 @@ function renderProfileRow(
   );
 }
 
-/**
- * One small pencil+label button that opens the editor for a single allowlisted document.
- *
- * `ButtonComponent.setIcon()` replaces the button contents, so the icon is rendered into its own
- * span next to the text instead.
- */
-function addEditButton(
-  row: Setting,
-  profile: ProfileRef,
-  name: ProfileDocumentName,
-  options: ProfileSectionOptions,
-): void {
-  const label = name.replace(/\.md$/, "");
-  const description = `Edit ${name} for ${profile.profileId}`;
-  row.addButton((button) => {
-    button.setTooltip(description).onClick(() => options.onEditDocument(profile, name));
-    button.buttonEl.addClass("hcv-profile-action");
-    button.buttonEl.setAttribute("aria-label", description);
-    const icon = button.buttonEl.createSpan({ cls: "hcv-profile-action-icon" });
-    setIcon(icon, "pencil");
-    button.buttonEl.createSpan({ text: label });
-  });
-}

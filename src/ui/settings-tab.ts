@@ -5,12 +5,12 @@ import { encodeSourceKey } from "../types/snapshot";
 import type HermesCronViewerPlugin from "../main";
 import { notify } from "./notices";
 import { ConnectionTargetModal } from "./connection-target-modal";
-import { ProfileDocumentModal } from "./profile-document-modal";
 import { discoverProfiles } from "./profile-discovery-runner";
 import { renderProfileSection } from "./profile-settings-section";
 import { renderServerSection } from "./server-settings-section";
-import { HERMES_KANBAN_VIEW } from "./hermes-kanban-view";
-import { HERMES_PROFILES_VIEW } from "./hermes-profiles-view";
+import { KANBAN_VIEW } from "../hermes/kanban-view";
+import { PROFILES_VIEW } from "../hermes/profiles-view";
+import { hue } from "../hermes/geometry";
 
 /** Actionable reason per transport failure, so the user knows what to fix outside the plugin. */
 const TRANSPORT_DETAIL: Record<TransportStatus, string> = {
@@ -71,14 +71,28 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       onRemove: (alias) => void this.removeServer(alias),
     });
     for (const alias of this.plugin.settings.servers) {
-      new Setting(containerEl).setName(`Hermes control center · ${alias}`)
-        .setDesc("Native Kanban task edits; profile skills and cron are read-only. Live freshness appears in each view.")
-        .addButton(button => button.setButtonText("Kanban").onClick(() => { void this.plugin.controlCenter?.open(HERMES_KANBAN_VIEW, alias); }))
-        .addButton(button => button.setButtonText("Profiles").onClick(() => { void this.plugin.controlCenter?.open(HERMES_PROFILES_VIEW, alias); }));
+      new Setting(containerEl).setName(alias)
+        .addExtraButton(button => button.setIcon("square-kanban").setTooltip("Kanban").onClick(() => void this.plugin.openHermes(KANBAN_VIEW, alias)))
+        .addExtraButton(button => button.setIcon("network").setTooltip("Profiles").onClick(() => void this.plugin.openHermes(PROFILES_VIEW, alias)));
     }
 
     new Setting(containerEl).setName("Profiles").setHeading();
     this.renderProfiles(containerEl);
+
+    const ids = this.plugin.profileIds();
+    if (ids.length > 0) {
+      new Setting(containerEl).setName("Profile colors").setHeading();
+      for (const id of ids) {
+        new Setting(containerEl).setName(id)
+          .addColorPicker(picker => picker
+            .setValueHsl({ h: Math.round(hue(id)), s: 68, l: 56 })
+            .onChange(() => this.plugin.setHue(id, picker.getValueHsl().h)))
+          .addExtraButton(button => button.setIcon("rotate-ccw").setTooltip("Reset").onClick(() => {
+            this.plugin.setHue(id, null);
+            this.display();
+          }));
+      }
+    }
 
     new Setting(containerEl).setName("Storage").setHeading();
     this.renderStorage(containerEl);
@@ -149,8 +163,6 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       },
       isSelected: (profile) => this.plugin.settings.selectedSources.includes(keyOf(profile)),
       onToggle: (profile, selected) => this.toggleProfile(profile, selected),
-      // Opens the editor only; nothing is written until the user saves inside the modal.
-      onEditDocument: (profile, name) => new ProfileDocumentModal(this.app, profile, name, this.plugin.processes.documents).open(),
     });
     if (rendered === 0) note(parent, "No profile known yet. Check a server to list its profiles.");
   }

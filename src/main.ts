@@ -11,14 +11,18 @@ import { Logger } from "./utils/logger";
 import { RefreshScheduler } from "./ui/refresh-scheduler";
 import { SnapshotDiskStore } from "./ui/snapshot-disk-store";
 import { PluginDataGateway } from "./ui/plugin-data-gateway";
-import { ControlCenterComposition } from "./ui/control-center-composition";
-import { controlCenterDependencies } from "./ui/control-center-dependencies";
-import type { ControlCenterDependencies } from "./types/control-center-composition";
 import { ControlCenterTargets } from "./ui/control-center-targets";
+import { HermesClient } from "./hermes/data";
+import { hues } from "./hermes/geometry";
+import { KANBAN_VIEW, KanbanView } from "./hermes/kanban-view";
+import { PROFILES_VIEW, ProfilesView } from "./hermes/profiles-view";
+import { HermesView, type HermesHost, type Layout } from "./hermes/ui";
 
 interface PersistedData {
   readonly settings?: Partial<ViewerSettings>;
   readonly remoteHomes?: Record<string, string>;
+  readonly hermesLayouts?: Record<string, Layout>;
+  readonly hermesHues?: Record<string, number>;
 }
 
 /** Wiring only: construct collaborators, register views and commands, restore persisted data. */
@@ -31,11 +35,11 @@ export default class HermesCronViewerPlugin extends Plugin {
   private remoteHomes: Record<string, string> = {};
   private store!: SnapshotDiskStore;
   private data!: PluginDataGateway;
-  controlCenter?: ControlCenterComposition;
+  private layouts: Record<string, Layout> = {};
   readonly processes = new ControlCenterProcesses();
   readonly targets = new ControlCenterTargets({
     settings: () => this.settings,
-    close: async alias => await this.controlCenter?.closeConnection(alias) ?? false,
+    close: async () => true,
     cancel: alias => this.processes.cancel(alias),
     save: settings => this.saveSettings(settings),
     forget: alias => this.forgetServer(alias),
@@ -46,6 +50,8 @@ export default class HermesCronViewerPlugin extends Plugin {
     const data = await this.data.read<PersistedData & Record<string, unknown>>();
     this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
     this.remoteHomes = { ...(data.remoteHomes ?? {}) };
+    this.layouts = { ...(data.hermesLayouts ?? {}) };
+    for (const [id, h] of Object.entries(data.hermesHues ?? {})) hues.set(id, h);
 
     this.adapter = new SshReadOnlyAdapter({ runner: this.processes.runner });
     this.state = new ViewerState(this.adapter, this.settings, this.logger);
@@ -94,8 +100,22 @@ export default class HermesCronViewerPlugin extends Plugin {
       callback: () => this.openSettings(),
     });
 
-    this.controlCenter = new ControlCenterComposition(this, this.data, () => this.settings.servers, { ...controlCenterDependencies(this.adapter), documents: this.processes.documents });
-    this.controlCenter.register();
+    const host: HermesHost = {
+      client: new HermesClient(this.adapter),
+      servers: () => this.settings.servers,
+      layout: alias => this.layouts[alias] ?? {},
+      saveLayout: (alias, layout) => {
+        this.layouts[alias] = layout;
+        void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesLayouts: this.layouts }));
+      },
+      openSettings: () => this.openSettings(),
+    };
+    this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
+    this.registerView(PROFILES_VIEW, leaf => new ProfilesView(leaf, host));
+    this.addRibbonIcon("square-kanban", "Hermes: Kanban", () => void this.openHermes(KANBAN_VIEW));
+    this.addRibbonIcon("network", "Hermes: Profiles", () => void this.openHermes(PROFILES_VIEW));
+    this.addCommand({ id: "open-hermes-kanban", name: "Open kanban", callback: () => void this.openHermes(KANBAN_VIEW) });
+    this.addCommand({ id: "open-hermes-profiles", name: "Open profiles", callback: () => void this.openHermes(PROFILES_VIEW) });
 
     this.addSettingTab(new HermesCronSettingsTab(this.app, this));
   }
@@ -105,13 +125,8 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.scheduler.stop();
     this.state.bodies.clear();
     this.state.dispose();
-    await Promise.all([this.controlCenter?.dispose(), this.processes.dispose()]);
+    await this.processes.dispose();
     this.logger.info("unloaded");
-  }
-
-  async configureControlCenter(dependencies: ControlCenterDependencies): Promise<void> {
-    if (!this.controlCenter) throw new TypeError("Control center is not loaded");
-    await this.controlCenter.configure(dependencies);
   }
 
   async saveSettings(settings: ViewerSettings): Promise<void> {
@@ -166,7 +181,30 @@ export default class HermesCronViewerPlugin extends Plugin {
       ...current,
       settings: this.settings,
       remoteHomes: this.remoteHomes,
+      hermesLayouts: this.layouts,
+      hermesHues: Object.fromEntries(hues),
     }) : current);
+  }
+
+  /** Profile ids placed on any profiles canvas, for the color settings. */
+  profileIds(): string[] {
+    return [...new Set(Object.values(this.layouts).flatMap(layout => Object.keys(layout)))].sort();
+  }
+
+  /** Pick (or with null, reset) a profile's hue and repaint open Hermes views. */
+  setHue(id: string, h: number | null): void {
+    if (h === null) hues.delete(id); else hues.set(id, h);
+    void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesHues: Object.fromEntries(hues) }));
+    for (const type of [KANBAN_VIEW, PROFILES_VIEW]) {
+      for (const leaf of this.app.workspace.getLeavesOfType(type)) if (leaf.view instanceof HermesView) leaf.view.repaint();
+    }
+  }
+
+  /** Kanban and profiles open as main-area tabs, one leaf each; `alias` picks the SSH host. */
+  async openHermes(viewType: string, alias?: string): Promise<void> {
+    const leaf = this.app.workspace.getLeavesOfType(viewType)[0] ?? this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: viewType, active: true, state: alias ? { alias } : {} });
+    await this.app.workspace.revealLeaf(leaf);
   }
 
   private openSettings(): void {

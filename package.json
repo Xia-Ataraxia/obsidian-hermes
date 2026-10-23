@@ -5,34 +5,15 @@
   "description": "Read-only Obsidian viewer for remote Hermes cron schedules and execution evidence.",
   "type": "module",
   "scripts": {
-    "build": "bun run esbuild.config.mjs && bun run scripts/test-build-seal.ts",
+    "build": "bun run esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:isolated": "bun run scripts/test-runner.ts isolated",
-    "test:live-readonly": "bun run scripts/test-runner.ts live-read-only"
+    "test": "bun test"
   },
   "devDependencies": {
-    "@tailwindcss/node": "4.3.3",
-    "@tailwindcss/oxide": "4.3.3",
     "@types/bun": "^1.4.2",
     "@types/node": "^22.10.2",
-    "@types/react": "19.2.17",
-    "@types/react-dom": "19.2.3",
     "esbuild": "^0.24.2",
     "obsidian": "^1.7.2",
-    "postcss": "8.5.23",
-    "postcss-selector-parser": "6.0.10",
-    "tailwindcss": "4.3.3",
     "typescript": "^5.7.2"
-  },
-  "dependencies": {
-    "@nous-research/ui": "0.18.2",
-    "class-variance-authority": "0.7.1",
-    "clsx": "2.1.1",
-    "motion": "12.42.2",
-    "radix-ui": "1.6.7",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
-    "tailwind-merge": "3.6.0"
   }
 }

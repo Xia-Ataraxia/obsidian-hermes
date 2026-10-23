@@ -7,7 +7,8 @@ export type RemoteOpKind =
   | "readJobsJson"
   | "listOutputFiles"
   | "readOutputFile"
-  | "queryExecutions";
+  | "queryExecutions"
+  | "hermes";
 
 /** A fully assembled remote command. `remoteCommand` is executed by the remote login shell. */
 export interface BoundRemoteCommand {

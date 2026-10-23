@@ -1,7 +1,6 @@
 import type { RejectionCode } from "./remote-command";
 import type { RemoteRunner } from "./remote-command";
 import type { ProfileRef } from "./hermes-cron";
-import type { ProfileDocumentName } from "./profile-document";
 import type { LedgerReadResult, SourceSnapshot } from "./snapshot";
 
 /** Profile candidates offered by the settings tab, before any per-server grouping. */
@@ -18,7 +17,6 @@ export interface ProfileSectionOptions {
   readonly sources: ProfileGroupSources;
   readonly isSelected: (profile: ProfileRef) => boolean;
   readonly onToggle: (profile: ProfileRef, selected: boolean) => Promise<void>;
-  readonly onEditDocument: (profile: ProfileRef, name: ProfileDocumentName) => void;
 }
 
 /** Obsidian's runtime settings controller, which is not exposed by all public type versions. */

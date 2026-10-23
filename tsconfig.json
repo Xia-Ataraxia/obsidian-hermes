@@ -24,10 +24,6 @@
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",
-    "esbuild.config.mjs",
-    "scripts/test*.ts"
-  ],
-  "exclude": [
-    "tests/fixtures/contract-source"
+    "esbuild.config.mjs"
   ]
 }

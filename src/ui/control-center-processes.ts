@@ -1,14 +1,12 @@
 import { spawn } from "node:child_process";
 import type { RemoteRunner } from "../types/remote-command";
 import { applyPrefixBound, decodeUtf8Prefix } from "../domain/response-bound";
-import { ProfileDocumentStore } from "./profile-document-store";
 
 export class ControlCenterProcesses {
   private readonly children = new Set<{ readonly alias: string; stop(): void; readonly done: Promise<void> }>();
   private readonly retired = new Set<string>();
   private disposed = false;
   readonly runner: RemoteRunner = (file, args, options) => this.run(file, args, options);
-  readonly documents = new ProfileDocumentStore((file, args, stdin, options) => this.run(file, args, options, stdin));
   private run(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number }, stdin?: string): ReturnType<RemoteRunner> {
     const alias = args[args.indexOf("--") + 1] ?? "";
     if (this.disposed || this.retired.has(alias)) return Promise.resolve({ stdout: "", stderr: "Connection closed", exitCode: null, capExceeded: false });
