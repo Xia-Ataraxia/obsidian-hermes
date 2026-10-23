@@ -1,5 +1,6 @@
 import { setTooltip, type WorkspaceLeaf } from "obsidian";
-import type { Profile, ProfilesSnapshot } from "./data";
+import type { EdgeMode } from "../types/snapshot";
+import type { Edge, Profile, ProfilesSnapshot } from "./data";
 import { curve, hue, ring, snap, type Guide, type Rect } from "./geometry";
 import { Inspector } from "./inspector";
 import { avatar, compact, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
@@ -19,6 +20,14 @@ const LOAD: readonly [keyof Profile["load"], string, string][] = [
   ["done7d", "check", "Done · 7d"],
 ];
 
+/** What an edge counts, for the legend switch and the settings dropdown: mode, icon, label, unit, meaning. */
+export const EDGE_MODES: readonly (readonly [EdgeMode, string, string, string, string])[] = [
+  ["handoffs", "arrow-right-left", "Handoffs", "handoff", "tasks one profile created for the other"],
+  ["comments", "message-square", "Comments", "comment", "comments on tasks assigned to the other"],
+  ["links", "link", "Dependencies", "link", "parent/child task links between them"],
+  ["all", "layers", "All", "interaction", "handoffs + comments + dependencies"],
+];
+
 function svg<K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
   const el = document.createElementNS(SVG, tag);
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
@@ -26,12 +35,15 @@ function svg<K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attr
   return el;
 }
 
-const color = (id: string, alpha = 1): string => `hsl(${Math.round(hue(id))} 68% 58% / ${alpha})`;
+const color = (id: string): string => `hsl(${Math.round(hue(id))} 68% 58%)`;
 const shortModel = (model: string): string => model.split("/").pop() ?? model;
+const plural = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? "" : "s"}`;
 
 /**
- * Profiles as cards on a pannable canvas. Edges are 30-day task handoffs (creator → assignee):
- * thickness and opacity scale with volume, the gradient runs from sender to receiver.
+ * Profiles as cards on a pannable canvas. One edge per pair counts 30-day interactions of the
+ * chosen kind (`EDGE_MODES`): thickness and opacity scale with volume, the gradient runs between
+ * the two hues and the curve bows around the cards in between. Edges redraw whenever the canvas
+ * or a card changes size, so a view rendered while hidden lays out once it is shown.
  * Dragging a card snaps it to the other cards' edges and centers with thin guides.
  */
 export class ProfilesView extends HermesView {
@@ -46,12 +58,25 @@ export class ProfilesView extends HermesView {
   private edgeLayer!: SVGSVGElement;
   private guideLayer!: SVGSVGElement;
   private zoomLabel!: HTMLElement;
+  private legend: HTMLElement | null = null;
   private readonly cards = new Map<string, HTMLElement>();
+  /** Last bow per pair, tried first so an edge keeps its side while cards move. */
+  private readonly bows = new Map<string, number>();
   private readonly uid = `hm${++instances}`;
   private inspector: Inspector | null = null;
+  private observer: ResizeObserver | null = null;
 
   constructor(leaf: WorkspaceLeaf, host: HermesHost) {
     super(leaf, host, 60_000);
+  }
+
+  private get mode(): (typeof EDGE_MODES)[number] {
+    return EDGE_MODES.find(([mode]) => mode === this.host.edgeMode()) ?? EDGE_MODES[0]!;
+  }
+
+  private weight(edge: Edge): number {
+    const [mode] = this.mode;
+    return mode === "all" ? edge.handoffs + edge.comments + edge.links : edge[mode];
   }
 
   getViewType(): string { return PROFILES_VIEW; }
@@ -89,7 +114,7 @@ export class ProfilesView extends HermesView {
     for (const profile of snapshot.profiles) this.cards.set(profile.id, this.card(profile, snapshot.now));
     const missing = snapshot.profiles.filter(profile => !this.positions.has(profile.id));
     if (missing.length > 0) {
-      const weight = (id: string): number => snapshot.edges.reduce((sum, edge) => sum + (edge.from === id || edge.to === id ? edge.weight : 0), 0);
+      const weight = (id: string): number => snapshot.edges.reduce((sum, edge) => sum + (edge.a === id || edge.b === id ? this.weight(edge) : 0), 0);
       const placed = ring(snapshot.profiles.map(profile => profile.id), weight, { w: CARD_W, h: 240 });
       for (const profile of missing) this.positions.set(profile.id, placed.get(profile.id) ?? [0, 0]);
     }
@@ -97,13 +122,24 @@ export class ProfilesView extends HermesView {
 
     this.controls();
     this.bind();
-    requestAnimationFrame(() => {
-      if (!this.fitted) { this.fit(); this.fitted = true; } else this.apply();
+    // Layout reads wait for real sizes: none while hidden, and again whenever a card or the canvas resizes.
+    this.observer ??= new ResizeObserver(() => {
+      if (!this.canvas.clientWidth) return;
+      if (!this.fitted && this.cards.size) { this.fit(); this.fitted = true; } else this.apply();
       this.drawEdges();
     });
+    this.observer.disconnect();
+    for (const el of [this.canvas, ...this.cards.values()]) this.observer.observe(el);
     const selected = this.inspector?.profileId;
     const profile = snapshot.profiles.find(candidate => candidate.id === selected);
-    if (profile) { this.inspector?.update(profile, snapshot.now); this.cards.get(profile.id)?.addClass("is-selected"); }
+    if (profile) { this.inspector?.update(profile, snapshot.now); this.cards.get(profile.id)?.addClass("is-selected"); } else this.inspector?.close();
+  }
+
+  /** The edge mode changed: new lines and legend only, so an open edit in the drawer survives. */
+  redrawEdges(): void {
+    if (!this.legend) return;
+    this.drawEdges();
+    this.drawLegend();
   }
 
   /* ───────────── cards ───────────── */
@@ -222,34 +258,41 @@ export class ProfilesView extends HermesView {
     if (!snapshot) return;
     this.edgeLayer.replaceChildren();
     const defs = svg(this.edgeLayer, "defs");
-    const max = Math.max(1, ...snapshot.edges.map(edge => edge.weight));
-    for (const edge of [...snapshot.edges].sort((a, b) => a.weight - b.weight)) {
-      if (!this.cards.has(edge.from) || !this.cards.has(edge.to)) continue;
-      const t = Math.sqrt(edge.weight / max);
-      const width = 1.25 + 6.75 * t;
-      const shape = curve(this.rect(edge.from), this.rect(edge.to), 5 + width * 1.15);
-      const id = `${this.uid}-${edge.from}-${edge.to}`;
+    const [, , , unit] = this.mode;
+    const edges = snapshot.edges.map(edge => [edge, this.weight(edge)] as const)
+      .filter(([edge, n]) => n > 0 && this.cards.has(edge.a) && this.cards.has(edge.b)).sort((x, y) => x[1] - y[1]);
+    const max = Math.max(1, ...edges.map(([, n]) => n));
+    const rects = new Map([...this.cards.keys()].map(id => [id, this.rect(id)]));
+    for (const [index, [{ a, b }, n]] of edges.entries()) {
+      const t = Math.sqrt(n / max);
+      const shape = curve(rects.get(a)!, rects.get(b)!, [...rects].filter(([id]) => id !== a && id !== b).map(([, rect]) => rect), this.bows.get(`${a} ${b}`));
+      this.bows.set(`${a} ${b}`, shape.bow);
+      const id = `${this.uid}-${index}`;
       const gradient = svg(defs, "linearGradient", { id, gradientUnits: "userSpaceOnUse", x1: shape.start[0], y1: shape.start[1], x2: shape.end[0], y2: shape.end[1] });
-      svg(gradient, "stop", { offset: 0, "stop-color": color(edge.from, 0.25 + 0.45 * t) });
-      svg(gradient, "stop", { offset: 1, "stop-color": color(edge.to, 0.55 + 0.45 * t) });
+      svg(gradient, "stop", { offset: 0, "stop-color": color(a) });
+      svg(gradient, "stop", { offset: 1, "stop-color": color(b) });
 
-      const group = svg(this.edgeLayer, "g", { class: "hm-edge", "data-from": edge.from, "data-to": edge.to });
+      const group = svg(this.edgeLayer, "g", { class: "hm-edge", "data-a": a, "data-b": b });
       group.style.setProperty("--t", t.toFixed(3));
-      svg(group, "title").textContent = `${edge.from} → ${edge.to} · ${edge.weight} tasks · 30d`;
+      svg(group, "title").textContent = `${a} ↔ ${b} · ${plural(n, unit)}`;
       svg(group, "path", { d: shape.d, class: "hm-edge-hit" });
-      svg(group, "path", { d: shape.d, class: "hm-edge-line", stroke: `url(#${id})`, "stroke-width": width.toFixed(2) });
-      if (t >= 0.3) svg(group, "path", { d: shape.d, class: "hm-edge-flow", "stroke-width": Math.max(1, width * 0.35).toFixed(2) });
-      svg(group, "polygon", { points: shape.head, class: "hm-edge-head", fill: color(edge.to, 0.55 + 0.45 * t) });
+      svg(group, "path", { d: shape.d, class: "hm-edge-line", stroke: `url(#${id})`, "stroke-width": (1.25 + 6.75 * t).toFixed(2) });
     }
   }
 
-  private drawGuides(guides: readonly Guide[]): void {
+  /** 1-screen-px lines (solid: edges, dashed: centers) with × where they meet the aligned cards; old lines fade out. */
+  private drawGuides(guides: readonly Guide[], targets: readonly string[] = []): void {
+    for (const [id, el] of this.cards) el.toggleClass("is-snap-target", targets.includes(id));
+    this.guideLayer.classList.toggle("is-on", guides.length > 0);
+    if (guides.length === 0) return;
+    const k = this.camera.k, over = 8 / k, size = 3 / k;
     this.guideLayer.replaceChildren();
+    this.guideLayer.setAttribute("stroke-width", String(1 / k));
     for (const guide of guides) {
-      const pad = 18;
-      const [x1, y1, x2, y2] = guide.axis === "x" ? [guide.at, guide.from - pad, guide.at, guide.to + pad] : [guide.from - pad, guide.at, guide.to + pad, guide.at];
-      svg(this.guideLayer, "line", { x1, y1, x2, y2, "stroke-width": 1 / this.camera.k });
-      for (const [cx, cy] of [[x1, y1], [x2, y2]]) svg(this.guideLayer, "circle", { cx: cx!, cy: cy!, r: 2.5 / this.camera.k });
+      const point = (along: number): [number, number] => guide.axis === "x" ? [guide.at, along] : [along, guide.at];
+      const [x1, y1] = point(Math.min(...guide.marks) - over), [x2, y2] = point(Math.max(...guide.marks) + over);
+      svg(this.guideLayer, "line", { x1, y1, x2, y2, "stroke-dasharray": guide.center ? `${4 / k} ${3 / k}` : "none" });
+      svg(this.guideLayer, "path", { d: guide.marks.map(mark => { const [x, y] = point(mark); return `M${x - size},${y - size}L${x + size},${y + size}M${x - size},${y + size}L${x + size},${y - size}`; }).join("") });
     }
   }
 
@@ -259,9 +302,9 @@ export class ProfilesView extends HermesView {
     this.canvas.toggleClass("is-focusing", id !== null);
     const partners = new Set<string>();
     for (const edge of Array.from(this.edgeLayer.querySelectorAll<SVGGElement>(".hm-edge"))) {
-      const lit = id !== null && (edge.dataset.from === id || edge.dataset.to === id);
+      const lit = id !== null && (edge.dataset.a === id || edge.dataset.b === id);
       edge.classList.toggle("is-lit", lit);
-      if (lit) { partners.add(edge.dataset.from!); partners.add(edge.dataset.to!); }
+      if (lit) { partners.add(edge.dataset.a!); partners.add(edge.dataset.b!); }
     }
     for (const [cardId, el] of this.cards) el.toggleClass("is-near", partners.has(cardId) || cardId === id);
   }
@@ -278,7 +321,7 @@ export class ProfilesView extends HermesView {
 
     canvas.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
-      if (event.button !== 0 || target.closest("button, input, select, .hm-controls")) return;
+      if (event.button !== 0 || target.closest("button, input, select, .hm-controls, .hm-legend")) return;
       const card = target.closest<HTMLElement>(".hm-card");
       const startX = event.clientX, startY = event.clientY;
       let moved = false;
@@ -289,16 +332,17 @@ export class ProfilesView extends HermesView {
       if (card) {
         const id = card.dataset.id!;
         const origin = this.rect(id);
-        const others = [...this.cards.keys()].filter(other => other !== id).map(other => this.rect(other));
+        const ids = [...this.cards.keys()].filter(other => other !== id);
+        const others = ids.map(other => this.rect(other));
         onMove = e => {
           if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < 3) return;
           if (!moved) { moved = true; this.dragging = true; this.focus(null); card.addClass("is-dragging"); }
           const free = { ...origin, x: origin.x + (e.clientX - startX) / this.camera.k, y: origin.y + (e.clientY - startY) / this.camera.k };
           // Alt drags freely, like PowerPoint.
-          const snapped = e.altKey ? { x: free.x, y: free.y, guides: [] } : snap(free, others, 6 / this.camera.k);
+          const snapped = e.altKey ? { x: free.x, y: free.y, guides: [], targets: [] } : snap(free, others, 6 / this.camera.k);
           this.positions.set(id, [Math.round(snapped.x), Math.round(snapped.y)]);
           this.place(id);
-          this.drawGuides(snapped.guides);
+          this.drawGuides(snapped.guides, snapped.targets.map(index => ids[index]!));
           this.drawEdges();
         };
         onUp = () => {
@@ -341,17 +385,29 @@ export class ProfilesView extends HermesView {
     iconButton(bar, "scan", "Fit", () => this.fit());
     iconButton(bar, "layout-grid", "Auto layout", () => {
       this.positions.clear();
+      this.bows.clear();
+      this.fitted = false;
       this.render();
-      requestAnimationFrame(() => { this.fit(); this.saveLayout(); });
+      this.saveLayout();
     });
+    this.legend = this.canvas.createDiv("hm-legend");
+    this.drawLegend();
+  }
 
-    const legend = this.canvas.createDiv("hm-legend");
-    setTooltip(legend, "Task handoffs · 30d");
-    icon(legend, "git-fork");
-    const sample = svg(legend, "svg", { viewBox: "0 0 64 12", width: 64, height: 12 });
+  private drawLegend(): void {
+    const legend = this.legend!;
+    legend.empty();
+    const [current, , , unit, meaning] = this.mode;
+    const modes = legend.createDiv("hm-segment");
+    for (const [mode, name, label, , what] of EDGE_MODES) {
+      iconButton(modes, name, `${label} · ${what}`, () => this.host.setEdgeMode(mode)).setAttr("aria-pressed", String(mode === current));
+    }
+    const scale = legend.createDiv("hm-legend-scale");
+    setTooltip(scale, `Thickness · ${meaning} · 30d`);
+    const sample = svg(scale, "svg", { viewBox: "0 0 64 12", width: 64, height: 12 });
     [1.2, 3, 5.5].forEach((width, index) => svg(sample, "line", { x1: 2 + index * 21, y1: 6, x2: 18 + index * 21, y2: 6, "stroke-width": width, stroke: "currentColor", "stroke-linecap": "round", opacity: 0.4 + index * 0.3 }));
-    const max = Math.max(0, ...(this.snapshot?.edges ?? []).map(edge => edge.weight));
-    legend.createSpan({ text: `1–${max}` });
+    const max = Math.max(0, ...(this.snapshot?.edges ?? []).map(edge => this.weight(edge)));
+    scale.createSpan({ text: `${max > 1 ? "1–" : ""}${plural(max, unit)}` });
   }
 
   private saveLayout(): void {
@@ -365,11 +421,12 @@ export class ProfilesView extends HermesView {
     this.inspector ??= new Inspector(this, this.contentEl, this.host, () => {
       for (const el of this.cards.values()) el.removeClass("is-selected");
       this.inspector = null;
-    });
+    }, () => this.snapshot?.profiles ?? [], () => void this.reload());
     this.inspector.show(this.alias, profile, this.snapshot!.now);
   }
 
   override async onClose(): Promise<void> {
+    this.observer?.disconnect();
     this.inspector?.close();
   }
 }

@@ -1,4 +1,4 @@
-import { MarkdownRenderer, Notice, setTooltip, type ItemView } from "obsidian";
+import { MarkdownRenderer, Notice, SuggestModal, setTooltip, type App, type ItemView } from "obsidian";
 import type { CronJob, Profile, ProfileDoc, Skill } from "./data";
 import { absolute, avatar, type HermesHost, icon, iconButton, relative, stat } from "./ui";
 
@@ -13,6 +13,33 @@ const TABS: readonly [Tab, string, string][] = [
   ["activity", "activity", "Activity"],
 ];
 const DOCS: Partial<Record<Tab, ProfileDoc>> = { soul: "SOUL.md", user: "memories/USER.md", memory: "memories/MEMORY.md" };
+
+type Pair = [model: string, provider: string];
+
+/** Substring filter over [model, provider]; a typed id that matches no model is offered as custom on the current provider. */
+class ModelPicker extends SuggestModal<Pair> {
+  constructor(app: App, readonly pairs: Pair[], private readonly current: Pair, private readonly pick: (pair: Pair) => void) {
+    super(app);
+    this.setPlaceholder("Default model");
+  }
+
+  getSuggestions(query: string): Pair[] {
+    const q = query.trim();
+    const hits = this.pairs.filter(pair => pair.join(" ").toLowerCase().includes(q.toLowerCase()));
+    return q && !hits.some(([model]) => model === q) ? [...hits, [q, this.current[1]]] : hits;
+  }
+
+  renderSuggestion(pair: Pair, el: HTMLElement): void {
+    const [model, provider] = pair;
+    el.addClass("mod-complex");
+    const content = el.createDiv("suggestion-content");
+    content.createDiv({ cls: "suggestion-title", text: model });
+    content.createDiv({ cls: "suggestion-note", text: this.pairs.includes(pair) ? provider : ["custom", provider].filter(Boolean).join(" · ") });
+    if (model === this.current[0] && provider === this.current[1]) icon(el.createDiv("suggestion-aux"), "check");
+  }
+
+  onChooseSuggestion(pair: Pair): void { this.pick(pair); }
+}
 
 /** Right-hand drawer for one profile: icon tabs, markdown documents with in-place editing. */
 export class Inspector {
@@ -29,7 +56,10 @@ export class Inspector {
   private readonly pane: HTMLElement;
   private readonly docs = new Map<string, string>();
 
-  constructor(private readonly view: ItemView, container: HTMLElement, private readonly host: HermesHost, private readonly onClose: () => void) {
+  constructor(
+    private readonly view: ItemView, container: HTMLElement, private readonly host: HermesHost, private readonly onClose: () => void,
+    private readonly peers: () => readonly Profile[], private readonly refresh: () => void,
+  ) {
     this.root = container.createDiv("hm-drawer");
     this.head = this.root.createDiv("hm-drawer-head");
     this.tabs = this.root.createDiv("hm-tabs");
@@ -69,12 +99,40 @@ export class Inspector {
     const title = head.createDiv("hm-drawer-title");
     title.createDiv({ cls: "hm-drawer-name", text: profile.id });
     const meta = title.createDiv("hm-drawer-meta");
-    if (profile.model) stat(meta, "cpu", profile.model, profile.provider || "Model");
+    stat(meta, "cpu", profile.model || "—", [profile.provider, "Change default model"].filter(Boolean).join(" · "), "is-action", "button")
+      .addEventListener("click", () => this.pickModel());
     for (const [platform, state] of Object.entries(profile.gateway?.platforms ?? {})) {
       stat(meta, state === "connected" ? "wifi" : "wifi-off", platform, `${platform} · ${state}`, state === "connected" ? "is-good" : "is-muted");
     }
     iconButton(head, "x", "Close", () => this.close(), "hm-push");
     if (profile.description) head.createDiv({ cls: "hm-drawer-desc", text: profile.description });
+  }
+
+  /** Models in use on this host first, then the cached catalog as it arrives; the write is `hermes config set`, then a refresh. */
+  private pickModel(): void {
+    const { alias, profile } = this;
+    const pairs: Pair[] = [];
+    const add = (pair: Pair): void => { if (pair[0] && !pairs.some(([m, p]) => m === pair[0] && p === pair[1])) pairs.push(pair); };
+    for (const peer of [profile, ...this.peers()]) add([peer.model, peer.provider]);
+    const picker = new ModelPicker(this.view.app, pairs, [profile.model, profile.provider], async ([model, provider]) => {
+      // A poll re-renders the head while the picker is open, so spin the stat that is there now.
+      const el = this.head.querySelector(".hm-stat.is-action");
+      el?.addClass("is-spinning");
+      try {
+        const outcome = await this.host.client.setModel(alias, profile.id, model, provider);
+        if (!outcome.ok) return void new Notice(outcome.message);
+        this.refresh();
+      } catch (error) {
+        new Notice(error instanceof Error ? error.message : String(error));
+      } finally {
+        el?.removeClass("is-spinning");
+      }
+    });
+    picker.open();
+    void this.host.client.models(alias, profile.id).then(catalog => {
+      catalog.forEach(add);
+      picker.inputEl.dispatchEvent(new Event("input"));
+    }).catch(error => new Notice(error instanceof Error ? error.message : String(error)));
   }
 
   private renderTabs(): void {

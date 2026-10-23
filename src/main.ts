@@ -1,6 +1,6 @@
 import { Plugin, type App, type WorkspaceLeaf } from "obsidian";
 import type { ObsidianSettingsAccess, TargetChangeResult } from "./types/contracts";
-import { DEFAULT_SETTINGS, type ViewerSettings } from "./types/snapshot";
+import { DEFAULT_SETTINGS, type EdgeMode, type ViewerSettings } from "./types/snapshot";
 import { ControlCenterProcesses } from "./ui/control-center-processes";
 import { SshReadOnlyAdapter } from "./ui/ssh-read-only-adapter";
 import { ViewerState } from "./ui/viewer-state";
@@ -108,6 +108,8 @@ export default class HermesCronViewerPlugin extends Plugin {
         this.layouts[alias] = layout;
         void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesLayouts: this.layouts }));
       },
+      edgeMode: () => this.settings.edgeMode,
+      setEdgeMode: mode => this.setEdgeMode(mode),
       openSettings: () => this.openSettings(),
     };
     this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
@@ -198,6 +200,13 @@ export default class HermesCronViewerPlugin extends Plugin {
     for (const type of [KANBAN_VIEW, PROFILES_VIEW]) {
       for (const leaf of this.app.workspace.getLeavesOfType(type)) if (leaf.view instanceof HermesView) leaf.view.repaint();
     }
+  }
+
+  /** What a line on the profiles canvas counts; the legend switch and the settings dropdown both land here. */
+  setEdgeMode(edgeMode: EdgeMode): void {
+    this.settings = { ...this.settings, edgeMode };
+    void this.data.update<Record<string, unknown>>(current => ({ ...current, settings: this.settings }));
+    for (const leaf of this.app.workspace.getLeavesOfType(PROFILES_VIEW)) if (leaf.view instanceof ProfilesView) leaf.view.redrawEdges();
   }
 
   /** Kanban and profiles open as main-area tabs, one leaf each; `alias` picks the SSH host. */

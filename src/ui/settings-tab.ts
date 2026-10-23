@@ -1,7 +1,7 @@
 import { PluginSettingTab, Setting, type App } from "obsidian";
 import type { ProfileRef } from "../types/hermes-cron";
 import type { TransportStatus } from "../types/remote-command";
-import { encodeSourceKey } from "../types/snapshot";
+import { encodeSourceKey, type EdgeMode } from "../types/snapshot";
 import type HermesCronViewerPlugin from "../main";
 import { notify } from "./notices";
 import { ConnectionTargetModal } from "./connection-target-modal";
@@ -9,7 +9,7 @@ import { discoverProfiles } from "./profile-discovery-runner";
 import { renderProfileSection } from "./profile-settings-section";
 import { renderServerSection } from "./server-settings-section";
 import { KANBAN_VIEW } from "../hermes/kanban-view";
-import { PROFILES_VIEW } from "../hermes/profiles-view";
+import { EDGE_MODES, PROFILES_VIEW } from "../hermes/profiles-view";
 import { hue } from "../hermes/geometry";
 
 /** Actionable reason per transport failure, so the user knows what to fix outside the plugin. */
@@ -78,6 +78,13 @@ export class HermesCronSettingsTab extends PluginSettingTab {
 
     new Setting(containerEl).setName("Profiles").setHeading();
     this.renderProfiles(containerEl);
+
+    new Setting(containerEl).setName("Profiles canvas").setHeading();
+    new Setting(containerEl).setName("Edges").setDesc("What a line between two profiles counts, last 30 days.")
+      .addDropdown(dropdown => dropdown
+        .addOptions(Object.fromEntries(EDGE_MODES.map(([mode, , label]) => [mode, label])))
+        .setValue(this.plugin.settings.edgeMode)
+        .onChange(value => this.plugin.setEdgeMode(value as EdgeMode)));
 
     const ids = this.plugin.profileIds();
     if (ids.length > 0) {

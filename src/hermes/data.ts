@@ -22,7 +22,8 @@ export interface Profile {
   readonly skills: readonly Skill[]; readonly jobs: readonly CronJob[]; readonly gateway: Gateway | null;
   readonly usage: Usage | null; readonly load: Load;
 }
-export interface Edge { readonly from: string; readonly to: string; readonly weight: number }
+/** One undirected pair (`a` < `b`) with 30-day counts per kind. */
+export interface Edge { readonly a: string; readonly b: string; readonly handoffs: number; readonly comments: number; readonly links: number }
 export interface ProfilesSnapshot { readonly now: number; readonly profiles: readonly Profile[]; readonly edges: readonly Edge[] }
 
 const PROFILES_SCRIPT = String.raw`
@@ -57,7 +58,7 @@ SQL
   S "alive $id"; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo 1
   if [ -f state.db ]; then
     S "usage $id"
-    sqlite3 -readonly state.db <<'SQL'
+    ro state.db <<'SQL'
 select json_object('sessions7d',count(*),
   'tokens7d',coalesce(sum(coalesce(input_tokens,0)+coalesce(output_tokens,0)),0),
   'cost7d',round(coalesce(sum(coalesce(actual_cost_usd,estimated_cost_usd,0)),0),2),
@@ -78,15 +79,20 @@ done
 for db in "$H/kanban.db" "$H"/kanban/boards/*/kanban.db; do
   [ -f "$db" ] || continue
   slug=default; [ "$db" = "$H/kanban.db" ] || slug=$(basename "$(dirname "$db")")
-  case "$slug" in _*) continue;; esac
+  case "$slug" in _*|*[!A-Za-z0-9_.-]*) continue;; esac
   S "graph $slug"
-  sqlite3 -readonly "$db" <<'SQL'
+  ro "$db" <<'SQL'
 with src as (select t.id, t.assignee dst, case when t.created_by='worker' then
     (select p.assignee from task_links l join tasks p on p.id=l.parent_id where l.child_id=t.id limit 1)
     else t.created_by end src from tasks t where t.created_at > strftime('%s','now')-30*86400)
 select json_object(
-  'edges',(select json_group_array(json_array(src,dst,n)) from (select src,dst,count(distinct id) n from src
+  'handoffs',(select json_group_array(json_array(src,dst,n)) from (select src,dst,count(distinct id) n from src
      where src is not null and dst is not null and src<>dst group by 1,2)),
+  'comments',(select json_group_array(json_array(a,b,n)) from (select c.author a,t.assignee b,count(*) n from task_comments c
+     join tasks t on t.id=c.task_id where c.created_at > strftime('%s','now')-30*86400 and t.assignee<>c.author group by 1,2)),
+  'links',(select json_group_array(json_array(a,b,n)) from (select p.assignee a,ch.assignee b,count(*) n from task_links l
+     join tasks p on p.id=l.parent_id join tasks ch on ch.id=l.child_id
+     where ch.created_at > strftime('%s','now')-30*86400 and p.assignee<>ch.assignee group by 1,2)),
   'load',(select json_group_array(json_array(assignee,status,n)) from (select assignee,status,count(*) n from tasks
      where assignee is not null and status not in ('archived','done') group by 1,2)),
   'done',(select json_group_array(json_array(assignee,n)) from (select assignee,count(*) n from tasks
@@ -118,7 +124,7 @@ type Triple = [string | null, string | null, number];
 
 export function parseProfiles(sections: Sections): ProfilesSnapshot {
   const ids = [...sections.keys()].filter(key => key.startsWith("profile ")).map(key => key.slice(8));
-  const edges = new Map<string, number>();
+  const edges = new Map<string, { handoffs: number; comments: number; links: number }>();
   const load = new Map<string, Load>();
   const loadOf = (id: string): Load => {
     let entry = load.get(id);
@@ -127,8 +133,16 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
   };
   for (const [key, text] of sections) {
     if (!key.startsWith("graph ")) continue;
-    const graph = json<{ edges?: Triple[]; load?: Triple[]; done?: [string, number][] }>(text, {});
-    for (const [from, to, n] of graph.edges ?? []) if (from && to) edges.set(`${from}\u0000${to}`, (edges.get(`${from}\u0000${to}`) ?? 0) + n);
+    const graph = json<{ handoffs?: Triple[]; comments?: Triple[]; links?: Triple[]; load?: Triple[]; done?: [string, number][] }>(text, {});
+    for (const kind of ["handoffs", "comments", "links"] as const) {
+      for (const [from, to, n] of graph[kind] ?? []) {
+        if (!from || !to || from === to) continue;
+        const key = [from, to].sort().join("\u0000");
+        const entry = edges.get(key) ?? { handoffs: 0, comments: 0, links: 0 };
+        entry[kind] += n;
+        edges.set(key, entry);
+      }
+    }
     for (const [who, status, n] of graph.load ?? []) {
       if (!who || !status) continue;
       const entry = loadOf(who);
@@ -173,10 +187,10 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
   return {
     now: Number(sections.get("now") ?? Date.now() / 1000),
     profiles,
-    edges: [...edges].map(([key, weight]) => {
-      const [from = "", to = ""] = key.split("\u0000");
-      return { from, to, weight };
-    }).filter(edge => known.has(edge.from) && known.has(edge.to)),
+    edges: [...edges].flatMap(([key, counts]) => {
+      const [a = "", b = ""] = key.split("\u0000");
+      return known.has(a) && known.has(b) ? [{ a, b, ...counts }] : [];
+    }),
   };
 }
 
@@ -213,7 +227,7 @@ for db in "$H/kanban.db" "$H"/kanban/boards/*/kanban.db; do
   case "$slug" in _*|*[!A-Za-z0-9_.-]*) continue;; esac
   [ "$slug" = default ] || { S "meta $slug"; cat "$dir/board.json" 2>/dev/null; }
   S "tasks $slug"
-  sqlite3 -readonly "$db" <<'SQL'
+  ro "$db" <<'SQL'
 select json_group_array(json_object('id',id,'title',title,'assignee',assignee,'status',status,'priority',coalesce(priority,0),
   'createdBy',created_by,'createdAt',created_at,'startedAt',started_at,'completedAt',completed_at,'block',block_kind,
   'comments',(select count(*) from task_comments c where c.task_id=t.id),
@@ -279,13 +293,30 @@ mkdir -p "$(dirname "$f")" && printf %s ${b64Arg(next)} > "$f.obsidian.$$" && mv
     return this.outcome(await runScript(this.adapter, alias, script));
   }
 
+  /** [model, provider] pairs from the model-picker cache Hermes keeps per profile (else the default profile's). */
+  async models(alias: string, profile: string): Promise<[string, string][]> {
+    const result = await runScript(this.adapter, alias, `S cache; cat ${profileDir(profile)}/provider_models_cache.json 2>/dev/null || cat "$H/provider_models_cache.json" 2>/dev/null; true`);
+    const cache = json<Record<string, { models?: unknown }> | null>(result.ok ? result.sections.get("cache") : undefined, null) ?? {};
+    return Object.entries(cache).flatMap(([provider, entry]) => Array.isArray(entry?.models)
+      ? entry.models.filter((model): model is string => typeof model === "string").map(model => [model, provider] as [string, string]) : []);
+  }
+
+  /** Provider first, so the CLI drops the old provider's base_url; a blank provider is left as is. */
+  async setModel(alias: string, profile: string, model: string, provider: string): Promise<Outcome> {
+    // The CLI would read a leading "-" as a flag; `--help` even exits 0, i.e. a write that never happened.
+    if (model.startsWith("-") || provider.startsWith("-")) return { ok: false, message: "Model and provider cannot start with -" };
+    const set = (key: string, value: string): string => `hermes -p ${safeToken(profile)} config set ${key} ${b64Arg(value)} </dev/null >/dev/null && `;
+    const script = `${provider ? set("model.provider", provider) : ""}${set("model.default", model)}S ok`;
+    return this.outcome(await runScript(this.adapter, alias, script, 64 * 1024));
+  }
+
   async boards(alias: string): Promise<Board[] | string> {
     const result = await runScript(this.adapter, alias, BOARDS_SCRIPT);
     return result.ok ? parseBoards(result.sections) : result.message;
   }
 
   async task(alias: string, board: string, id: string): Promise<TaskDetail | null> {
-    const script = `S detail; sqlite3 -readonly ${boardDb(board)} <<'SQL'
+    const script = `S detail; ro ${boardDb(board)} <<'SQL'
 select json_object('body',coalesce(body,''),'result',result,
   'comments',(select json_group_array(json_object('author',author,'body',body,'at',created_at)) from (select * from task_comments where task_id=t.id order by created_at)),
   'runs',(select json_group_array(json_object('profile',profile,'status',status,'outcome',outcome,'summary',summary,'error',substr(error,1,600),'started',started_at,'ended',ended_at)) from (select * from task_runs where task_id=t.id order by started_at desc limit 10)),

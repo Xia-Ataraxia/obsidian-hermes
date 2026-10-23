@@ -1,17 +1,17 @@
 /** Pure canvas math: snapping, edge curves and the initial layout. No DOM. */
 
 export interface Rect { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
-/** A thin alignment line: `axis: "x"` is vertical at `at`, spanning `from`..`to` on y. */
-export interface Guide { readonly axis: "x" | "y"; readonly at: number; readonly from: number; readonly to: number }
+/** A thin alignment line: `axis: "x"` is vertical at `at`; `marks` are where it meets the aligned rects' edges on y. */
+export interface Guide { readonly axis: "x" | "y"; readonly at: number; readonly center: boolean; readonly marks: readonly number[] }
 
 const lines = (start: number, size: number): number[] => [start, start + size / 2, start + size];
 
 /**
  * Slides-style snapping: the moving rect's left/center/right (top/middle/bottom) lock onto the
  * nearest matching line of any other rect within `threshold`, then every line that now coincides
- * becomes a guide spanning the rects that share it.
+ * becomes a guide across the rects that share it. `targets` are their indices in `others`.
  */
-export function snap(moving: Rect, others: readonly Rect[], threshold: number): { x: number; y: number; guides: Guide[] } {
+export function snap(moving: Rect, others: readonly Rect[], threshold: number): { x: number; y: number; guides: Guide[]; targets: number[] } {
   const offset = (axis: "x" | "y"): number => {
     let best = Infinity;
     for (const other of others) {
@@ -25,51 +25,55 @@ export function snap(moving: Rect, others: readonly Rect[], threshold: number): 
   };
   const placed = { ...moving, x: moving.x + offset("x"), y: moving.y + offset("y") };
   const guides: Guide[] = [];
+  const targets = new Set<number>();
   for (const axis of ["x", "y"] as const) {
     const cross = axis === "x" ? "y" : "x";
     const crossSize = axis === "x" ? "h" : "w";
-    for (const at of axis === "x" ? lines(placed.x, placed.w) : lines(placed.y, placed.h)) {
-      const sharing = others.filter(other => (axis === "x" ? lines(other.x, other.w) : lines(other.y, other.h)).some(line => Math.abs(line - at) < 0.5));
+    for (const [index, at] of (axis === "x" ? lines(placed.x, placed.w) : lines(placed.y, placed.h)).entries()) {
+      const sharing = others.flatMap((other, i) => (axis === "x" ? lines(other.x, other.w) : lines(other.y, other.h)).some(line => Math.abs(line - at) < 0.5) ? [i] : []);
       if (sharing.length === 0) continue;
-      const span = [placed, ...sharing];
-      guides.push({ axis, at, from: Math.min(...span.map(r => r[cross])), to: Math.max(...span.map(r => r[cross] + r[crossSize])) });
+      for (const i of sharing) targets.add(i);
+      guides.push({ axis, at, center: index === 1, marks: [placed, ...sharing.map(i => others[i]!)].flatMap(r => [r[cross], r[cross] + r[crossSize]]) });
     }
   }
-  return { x: placed.x, y: placed.y, guides };
+  return { x: placed.x, y: placed.y, guides, targets: [...targets] };
 }
 
-/** Where the ray from the rect center towards (tx, ty) leaves the rect, pushed out by `gap`. */
-function exit(rect: Rect, tx: number, ty: number, gap: number): [number, number] {
+/** Where the ray from the rect center towards (tx, ty) leaves the rect. */
+function exit(rect: Rect, tx: number, ty: number): [number, number] {
   const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
   const dx = tx - cx, dy = ty - cy;
-  const scale = 1 / Math.max(Math.abs(dx) / (rect.w / 2 + gap), Math.abs(dy) / (rect.h / 2 + gap), 1e-9);
+  const scale = 1 / Math.max(Math.abs(dx) / (rect.w / 2), Math.abs(dy) / (rect.h / 2), 1e-9);
   return [cx + dx * scale, cy + dy * scale];
 }
 
-export interface Curve { readonly d: string; readonly head: string; readonly mid: readonly [number, number]; readonly start: readonly [number, number]; readonly end: readonly [number, number] }
+export interface Curve { readonly d: string; readonly mid: readonly [number, number]; readonly start: readonly [number, number]; readonly end: readonly [number, number]; readonly bow: number }
 
 /**
- * A gently bowed quadratic between two cards. The bow is always to the right of travel, so A→B
- * and B→A separate into two arcs instead of overlapping.
+ * A gently bowed quadratic from border to border (cards sit above edges and hide the round caps).
+ * It takes `prefer` (the caller's last bow) while that stays clear of `obstacles`, else the gentlest
+ * clear bow (alternating sides), so it never runs under a card and does not flip sides mid-drag.
  */
-export function curve(from: Rect, to: Rect, headSize: number): Curve {
-  const fc = [from.x + from.w / 2, from.y + from.h / 2] as const;
-  const tc = [to.x + to.w / 2, to.y + to.h / 2] as const;
-  const start = exit(from, tc[0], tc[1], 6);
-  const end = exit(to, fc[0], fc[1], 8 + headSize);
-  const dx = end[0] - start[0], dy = end[1] - start[1];
-  const length = Math.hypot(dx, dy) || 1;
-  const bow = Math.min(60, length * 0.14);
-  const control = [(start[0] + end[0]) / 2 - (dy / length) * bow, (start[1] + end[1]) / 2 + (dx / length) * bow] as const;
-  // Arrow tip sits `headSize` beyond the stroke end, along the end tangent.
-  const tx = end[0] - control[0], ty = end[1] - control[1];
-  const tl = Math.hypot(tx, ty) || 1;
-  const ux = tx / tl, uy = ty / tl;
-  const tip = [end[0] + ux * headSize, end[1] + uy * headSize];
-  const wing = headSize * 0.62;
-  const head = `${tip[0]},${tip[1]} ${end[0] - uy * wing},${end[1] + ux * wing} ${end[0] + uy * wing},${end[1] - ux * wing}`;
-  const mid = [0.25 * start[0] + 0.5 * control[0] + 0.25 * end[0], 0.25 * start[1] + 0.5 * control[1] + 0.25 * end[1]] as const;
-  return { d: `M${start[0]},${start[1]} Q${control[0]},${control[1]} ${end[0]},${end[1]}`, head, mid, start, end };
+// ponytail: sampled bow search, not a router; dense layouts fall back to the least-blocked bow.
+export function curve(a: Rect, b: Rect, obstacles: readonly Rect[] = [], prefer = 1): Curve {
+  const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+  const length = Math.hypot(bx - ax, by - ay) || 1;
+  const nx = (ay - by) / length, ny = (bx - ax) / length;
+  const base = Math.min(60, length * 0.14);
+  let best: Curve | null = null, fewest = Infinity;
+  for (const factor of [prefer, 1, -1, 2, -2, 3.5, -3.5, 5, -5, 7, -7]) {
+    const control = [(ax + bx) / 2 + nx * base * factor, (ay + by) / 2 + ny * base * factor] as const;
+    const start = exit(a, control[0], control[1]), end = exit(b, control[0], control[1]);
+    const at = (t: number): [number, number] => [0, 1].map(i => (1 - t) ** 2 * start[i]! + 2 * (1 - t) * t * control[i]! + t ** 2 * end[i]!) as [number, number];
+    let hits = 0;
+    for (let i = 1; i < 25; i++) {
+      const [x, y] = at(i / 25);
+      if (obstacles.some(r => x > r.x - 12 && x < r.x + r.w + 12 && y > r.y - 12 && y < r.y + r.h + 12)) hits++;
+    }
+    if (hits < fewest) { fewest = hits; best = { d: `M${start[0]},${start[1]} Q${control[0]},${control[1]} ${end[0]},${end[1]}`, mid: at(0.5), start, end, bow: factor }; }
+    if (hits === 0) break;
+  }
+  return best!;
 }
 
 /** Hub in the middle, everyone else on a ring around it, strongest partners first. */

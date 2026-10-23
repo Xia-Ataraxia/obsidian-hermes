@@ -1,4 +1,5 @@
 import { ItemView, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import type { EdgeMode } from "../types/snapshot";
 import type { HermesClient } from "./data";
 import { hue } from "./geometry";
 
@@ -10,6 +11,8 @@ export interface HermesHost {
   servers(): readonly string[];
   layout(alias: string): Layout;
   saveLayout(alias: string, layout: Layout): void;
+  edgeMode(): EdgeMode;
+  setEdgeMode(mode: EdgeMode): void;
   openSettings(): void;
 }
 
@@ -31,8 +34,8 @@ export function iconButton(parent: HTMLElement, name: string, label: string, onC
 }
 
 /** Icon + short value, e.g. ⚡ 12. Tooltip carries the meaning. */
-export function stat(parent: HTMLElement, name: string, value: string | number, label: string, cls = ""): HTMLElement {
-  const el = parent.createSpan({ cls: `hm-stat ${cls}`.trim() });
+export function stat(parent: HTMLElement, name: string, value: string | number, label: string, cls = "", tag: "span" | "button" = "span"): HTMLElement {
+  const el = parent.createEl(tag, { cls: `hm-stat ${cls}`.trim() });
   icon(el, name);
   el.createSpan({ text: String(value) });
   setTooltip(el, label);
@@ -92,6 +95,8 @@ export abstract class HermesView extends ItemView {
   private refreshButton!: HTMLElement;
   private loadedAt = 0;
   private inflight: Promise<void> | null = null;
+  /** A non-quiet reload came in mid-pull; that pull may predate a write, so pull once more after it. */
+  private again = false;
 
   constructor(leaf: WorkspaceLeaf, protected readonly host: HermesHost, private readonly pollMs: number) {
     super(leaf);
@@ -147,7 +152,10 @@ export abstract class HermesView extends ItemView {
   }
 
   protected async reload(quiet = false): Promise<void> {
-    if (this.inflight) return this.inflight;
+    if (this.inflight) {
+      if (!quiet) this.again = true;
+      return this.inflight;
+    }
     if (!this.alias) {
       this.buildToolbar();
       if (!this.alias) return this.empty("server", "No SSH host", "Settings", () => this.host.openSettings());
@@ -170,6 +178,7 @@ export abstract class HermesView extends ItemView {
     })().finally(() => {
       this.inflight = null;
       this.refreshButton.removeClass("is-spinning");
+      if (this.again) { this.again = false; void this.reload(); }
     });
     return this.inflight;
   }

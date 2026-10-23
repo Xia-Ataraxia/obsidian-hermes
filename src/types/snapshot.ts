@@ -99,7 +99,11 @@ export interface ViewerSettings {
   /** When false, job names are displayed but not written to disk. */
   readonly persistJobNames: boolean;
   readonly historyLimit: number;
+  /** What a line between two profile cards counts. */
+  readonly edgeMode: EdgeMode;
 }
+
+export type EdgeMode = "handoffs" | "comments" | "links" | "all";
 
 export const DEFAULT_SETTINGS: ViewerSettings = {
   servers: [],
@@ -107,6 +111,7 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   autoRefreshSeconds: 60,
   persistJobNames: true,
   historyLimit: 50,
+  edgeMode: "handoffs",
 };
 
 /** Discovery result for one server: candidate profiles the user may select. */

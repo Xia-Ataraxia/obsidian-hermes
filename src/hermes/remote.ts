@@ -13,10 +13,14 @@ export type RemoteResult =
   | { readonly ok: true; readonly sections: Sections }
   | { readonly ok: false; readonly transport: TransportStatus; readonly message: string };
 
+// `ro`: a WAL db opens -readonly only while a writer holds its -wal/-shm; without them nothing is pending, so read it immutable.
+// The SQL is buffered, so a -wal that vanishes between the test and the open (CANTOPEN) falls back to immutable too.
+// ponytail: immutable skips locks, so a writer starting mid-read can garble one poll; the next poll heals it.
 const PRELUDE = `export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 H="$HOME/.hermes"
 S() { printf '\\036%s\\n' "$1"; }
 arg() { printf %s "$1" | base64 -d; }
+ro() { q=$(cat); if [ -e "$1-wal" ] && printf '%s\\n' "$q" | sqlite3 -readonly "$1" 2>/dev/null; then :; else printf '%s\\n' "$q" | sqlite3 "file:$1?immutable=1"; fi; }
 `;
 
 const SAFE_TOKEN = /^[A-Za-z0-9_.-]{1,64}$/;
