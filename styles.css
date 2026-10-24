@@ -1625,3 +1625,35 @@
 @media (prefers-reduced-motion: reduce) {
   .hm-view *, .hm-view *::before, .hm-view *::after { animation: none !important; transition: none !important; }
 }
+
+/* ═════════════ Chat ═════════════ */
+
+.hm-chat-chips { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.hm-chat-chip.clickable-icon { flex: none; padding: 3px; border-radius: 50%; }
+.hm-chat-chip[aria-pressed="true"] .hm-avatar { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
+.hm-chat-chip.is-streaming .hm-avatar { box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 45%, transparent); animation: hm-pulse 2.2s ease-out infinite; }
+.hm-chat-head { display: flex; flex: none; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--hm-line); }
+.hm-chat-head .hm-gw { margin-left: 0; }
+.hm-chat-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.hm-chat-log { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-x: hidden; overflow-y: auto; }
+.hm-chat-history, .hm-chat-turn { display: contents; }
+.hm-chat-log .hm-empty { flex: 1; height: auto; }
+.hm-chat-log .hm-stat { align-self: flex-start; white-space: normal; overflow-wrap: anywhere; }
+.hm-chat-log .hm-error { margin-top: 0; user-select: text; }
+.hm-chat-log .hm-doc { overflow-wrap: anywhere; user-select: text; }
+.hm-chat-log .hm-doc pre { overflow-x: auto; }
+.hm-chat-user { align-self: flex-end; max-width: 85%; padding: 6px 10px; border-radius: 10px; background: var(--hm-soft); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.hm-chat-live { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.hm-chat-live:empty::before { content: "…"; color: var(--text-faint); }
+.hm-chat-tool { flex: none; border: 1px solid var(--hm-line); border-radius: 8px; font-size: 12px; }
+.hm-chat-tool summary { display: flex; align-items: center; gap: 6px; padding: 4px 8px; color: var(--text-muted); cursor: pointer; }
+.hm-chat-tool.is-error summary { color: var(--hm-bad); }
+.hm-chat-tool.is-blocked summary { color: var(--hm-warn); }
+.hm-chat-tool pre { max-height: 200px; margin: 0; padding: 6px 8px; border-top: 1px solid var(--hm-line); overflow: auto; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hm-chat-foot { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.hm-chat-banner { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--hm-warn) 12%, transparent); color: var(--hm-warn); font-size: 12px; user-select: text; }
+.hm-chat-banner > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hm-chat-composer { display: flex; flex: none; align-items: flex-end; gap: 6px; padding: 8px; border-top: 1px solid var(--hm-line); }
+.hm-chat-composer textarea { flex: 1; min-width: 0; max-height: 160px; padding: 6px 10px; border-radius: 8px; font-size: 13px; field-sizing: content; resize: none; }
+/* ponytail: the status bar is fixed over the right split's bottom edge (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */
+.mod-right-split .hm-chat-composer { padding-bottom: 36px; }

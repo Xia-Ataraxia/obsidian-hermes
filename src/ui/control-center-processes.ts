@@ -11,6 +11,8 @@ export class ControlCenterProcesses {
     const alias = args[args.indexOf("--") + 1] ?? "";
     if (this.disposed || this.retired.has(alias)) return Promise.resolve({ stdout: "", stderr: "Connection closed", exitCode: null, capExceeded: false });
     return new Promise((resolve, reject) => {
+      let completed!: () => void;
+      const done = new Promise<void>(settle => { completed = settle; });
       const child = spawn(file, [...args], { stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
       const chunks: Uint8Array[] = [];
       let bytes = 0;
@@ -25,8 +27,7 @@ export class ControlCenterProcesses {
         child.kill("SIGTERM");
         killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
       };
-      const completed = Promise.withResolvers<void>();
-      const owned = { alias, stop, done: completed.promise };
+      const owned = { alias, stop, done };
       this.children.add(owned);
       const timer = setTimeout(stop, options.timeoutMs);
       child.stdout?.on("data", (chunk: Buffer) => {
@@ -43,13 +44,70 @@ export class ControlCenterProcesses {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         this.children.delete(owned);
-        completed.resolve();
+        completed();
         if (failure) { reject(failure); return; }
         const bounded = applyPrefixBound(Buffer.concat(chunks), options.maxBytes);
         resolve({ stdout: decodeUtf8Prefix(bounded.bytes), stderr: stopped && !capped ? "Connection closed or command timed out" : stderr,
           exitCode: stopped ? null : exitCode, capExceeded: capped || bounded.capExceeded });
       });
     });
+  }
+  /** One long-lived remote command with line callbacks; never rejects, and is `refused` when it never ran. Tracked like `run`, so `cancel`/`dispose` stop it. */
+  stream(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number; onStdout(line: string): void; onStderr(line: string): void }):
+    { stop(): void; readonly done: Promise<{ exitCode: number | null; stderrTail: string; refused?: boolean }> } {
+    const alias = args[args.indexOf("--") + 1] ?? "";
+    if (this.disposed || this.retired.has(alias)) return { stop() {}, done: Promise.resolve({ exitCode: null, stderrTail: "Connection closed", refused: true }) };
+    // Plain promises, not Promise.withResolvers: older Obsidian installers ship Chromium < 119.
+    let settle!: (result: { exitCode: number | null; stderrTail: string }) => void;
+    const done = new Promise<{ exitCode: number | null; stderrTail: string }>(resolve => { settle = resolve; });
+    const child = spawn(file, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    let bytes = 0;
+    let tail = "";
+    // Why we stopped; it goes after the tail on close, so stderr that keeps coming never pushes it out.
+    let reason = "";
+    let stopped = false;
+    let closed = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = (): void => {
+      if (stopped || closed) return;
+      stopped = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+    };
+    // utf8 decoding keeps a character split across chunks whole; the partial last line waits for the next chunk.
+    // A callback that throws is logged, so the rest of the chunk still arrives.
+    const lines = (emit: (line: string) => void) => {
+      const each = (line: string) => { try { emit(line); } catch (error) { console.error(error); } };
+      let rest = "";
+      return {
+        push(text: string): void { const parts = (rest + text).split("\n"); rest = parts.pop() ?? ""; parts.forEach(each); },
+        flush(): void { if (rest) each(rest); rest = ""; },
+      };
+    };
+    const out = lines(line => options.onStdout(line));
+    const err = lines(line => { tail = (tail + line + "\n").slice(-4096); options.onStderr(line); });
+    const owned = { alias, stop, done: done.then(() => undefined) };
+    this.children.add(owned);
+    const timer = setTimeout(() => { reason = "Timed out\n"; stop(); }, options.timeoutMs);
+    child.stdout?.setEncoding("utf8").on("data", (text: string) => {
+      if (stopped) return;
+      bytes += Buffer.byteLength(text);
+      if (bytes > options.maxBytes) { reason = "Response too large\n"; stop(); return; }
+      out.push(text);
+    });
+    // stderr keeps flowing after stop, so a late `Session:` line still lands.
+    child.stderr?.setEncoding("utf8").on("data", (text: string) => err.push(text));
+    child.once("error", error => { tail += `${error.message}\n`; });
+    child.once("close", exitCode => {
+      closed = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      out.flush();
+      err.flush();
+      this.children.delete(owned);
+      settle({ exitCode: stopped ? null : exitCode, stderrTail: tail + reason });
+    });
+    return { stop, done };
   }
   allow(aliases: readonly string[]): void { for (const alias of aliases) this.retired.delete(alias); }
   async cancel(alias: string): Promise<void> {

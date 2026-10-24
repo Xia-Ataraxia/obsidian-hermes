@@ -196,7 +196,7 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
 
 export type ProfileDoc = "SOUL.md" | "memories/USER.md" | "memories/MEMORY.md";
 
-function profileDir(id: string): string {
+export function profileDir(id: string): string {
   return id === "default" ? `"$H"` : `"$H/profiles/${safeToken(id)}"`;
 }
 
