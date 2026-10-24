@@ -200,74 +200,8 @@ function profileDir(id: string): string {
   return id === "default" ? `"$H"` : `"$H/profiles/${safeToken(id)}"`;
 }
 
-/* ───────────────────────── Kanban ───────────────────────── */
-
-export const STATUSES = ["triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done"] as const;
-export type Status = typeof STATUSES[number] | "archived";
-
-export interface Task {
-  readonly id: string; readonly board: string; readonly title: string; readonly assignee: string | null;
-  readonly status: Status; readonly priority: number; readonly createdBy: string | null;
-  readonly createdAt: number; readonly startedAt: number | null; readonly completedAt: number | null;
-  readonly block: string | null; readonly comments: number; readonly children: number; readonly snippet: string;
-}
-export interface Board { readonly slug: string; readonly name: string; readonly icon: string; readonly description: string; readonly tasks: readonly Task[] }
-export interface TaskDetail {
-  readonly body: string; readonly result: string | null;
-  readonly comments: readonly { author: string; body: string; at: number }[];
-  readonly runs: readonly { profile: string | null; status: string; outcome: string | null; summary: string | null; error: string | null; started: number; ended: number | null }[];
-  readonly events: readonly { kind: string; at: number }[];
-  readonly parents: readonly string[]; readonly childIds: readonly string[];
-}
-
-const BOARDS_SCRIPT = String.raw`
-for db in "$H/kanban.db" "$H"/kanban/boards/*/kanban.db; do
-  [ -f "$db" ] || continue
-  dir=$(dirname "$db"); slug=default; [ "$db" = "$H/kanban.db" ] || slug=$(basename "$dir")
-  case "$slug" in _*|*[!A-Za-z0-9_.-]*) continue;; esac
-  [ "$slug" = default ] || { S "meta $slug"; cat "$dir/board.json" 2>/dev/null; }
-  S "tasks $slug"
-  ro "$db" <<'SQL' || printf '[]\n'
-select json_group_array(json_object('id',id,'title',title,'assignee',assignee,'status',status,'priority',coalesce(priority,0),
-  'createdBy',created_by,'createdAt',created_at,'startedAt',started_at,'completedAt',completed_at,'block',block_kind,
-  'comments',(select count(*) from task_comments c where c.task_id=t.id),
-  'children',(select count(*) from task_links l where l.parent_id=t.id),
-  'snippet',substr(replace(coalesce(body,''),char(10),' '),1,200)))
-from tasks t where status<>'archived' and (status<>'done' or completed_at > strftime('%s','now')-14*86400);
-SQL
-done
-`;
-
-export function parseBoards(sections: Sections): Board[] {
-  const boards: Board[] = [];
-  for (const [key, text] of sections) {
-    if (!key.startsWith("tasks ")) continue;
-    const slug = key.slice(6);
-    const meta = json<{ name?: string; icon?: string; description?: string; archived?: boolean }>(sections.get(`meta ${slug}`), {});
-    if (meta.archived) continue;
-    const tasks = json<Omit<Task, "board">[]>(text, []).map(task => ({ ...task, board: slug }));
-    boards.push({ slug, name: meta.name || (slug === "default" ? "Default" : slug), icon: meta.icon ?? "", description: meta.description ?? "", tasks });
-  }
-  return boards;
-}
-
-function boardDb(slug: string): string {
-  return slug === "default" ? `"$H/kanban.db"` : `"$H/kanban/boards/${safeToken(slug)}/kanban.db"`;
-}
-
 /* ───────────────────────── Client ───────────────────────── */
 
-export type Move = "complete" | "block" | "unblock" | "promote" | "archive";
-export type Column = typeof STATUSES[number];
-
-/** Which CLI verb a drop onto `target` means for a task in `from`; null = not a legal drop. */
-export function dropMove(from: Status, target: Column): Move | null {
-  if (from === target) return null;
-  if (target === "done") return "complete";
-  if (target === "blocked") return from === "done" ? null : "block";
-  if (target === "ready") return from === "blocked" ? "unblock" : from === "todo" || from === "triage" ? "promote" : null;
-  return null;
-}
 export type Outcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
 /** Every read is a deterministic file or sqlite read; every write goes through the `hermes` CLI. */
@@ -307,48 +241,6 @@ mkdir -p "$(dirname "$f")" && printf %s ${b64Arg(next)} > "$f.obsidian.$$" && mv
     if (model.startsWith("-") || provider.startsWith("-")) return { ok: false, message: "Model and provider cannot start with -" };
     const set = (key: string, value: string): string => `hermes -p ${safeToken(profile)} config set ${key} ${b64Arg(value)} </dev/null >/dev/null && `;
     const script = `${provider ? set("model.provider", provider) : ""}${set("model.default", model)}S ok`;
-    return this.outcome(await runScript(this.adapter, alias, script, 64 * 1024));
-  }
-
-  async boards(alias: string): Promise<Board[] | string> {
-    const result = await runScript(this.adapter, alias, BOARDS_SCRIPT);
-    return result.ok ? parseBoards(result.sections) : result.message;
-  }
-
-  async task(alias: string, board: string, id: string): Promise<TaskDetail | null> {
-    const script = `S detail; ro ${boardDb(board)} <<'SQL'
-select json_object('body',coalesce(body,''),'result',result,
-  'comments',(select json_group_array(json_object('author',author,'body',body,'at',created_at)) from (select * from task_comments where task_id=t.id order by created_at)),
-  'runs',(select json_group_array(json_object('profile',profile,'status',status,'outcome',outcome,'summary',summary,'error',substr(error,1,600),'started',started_at,'ended',ended_at)) from (select * from task_runs where task_id=t.id order by started_at desc limit 10)),
-  'events',(select json_group_array(json_object('kind',kind,'at',created_at)) from (select * from task_events where task_id=t.id order by created_at desc limit 20)),
-  'parents',(select json_group_array(parent_id) from task_links where child_id=t.id),
-  'childIds',(select json_group_array(child_id) from task_links where parent_id=t.id))
-from tasks t where id='${safeToken(id)}';
-SQL`;
-    const result = await runScript(this.adapter, alias, script);
-    return result.ok ? json<TaskDetail | null>(result.sections.get("detail"), null) : null;
-  }
-
-  move(alias: string, board: string, id: string, move: Move): Promise<Outcome> {
-    const extra = move === "block" ? ` ${b64Arg("Blocked from Obsidian")}` : "";
-    return this.kanban(alias, board, `${move} ${safeToken(id)}${extra}`);
-  }
-
-  assign(alias: string, board: string, id: string, profile: string | null): Promise<Outcome> {
-    return this.kanban(alias, board, `assign ${safeToken(id)} ${profile ? safeToken(profile) : "none"}`);
-  }
-
-  comment(alias: string, board: string, id: string, text: string): Promise<Outcome> {
-    return this.kanban(alias, board, `comment ${safeToken(id)} ${b64Arg(text)} --author obsidian`);
-  }
-
-  create(alias: string, board: string, title: string, assignee: string | null, body: string): Promise<Outcome> {
-    const flags = `${assignee ? ` --assignee ${safeToken(assignee)}` : ""}${body ? ` --body ${b64Arg(body)}` : ""}`;
-    return this.kanban(alias, board, `create ${b64Arg(title)}${flags} --created-by obsidian`);
-  }
-
-  private async kanban(alias: string, board: string, verb: string): Promise<Outcome> {
-    const script = `hermes kanban --board ${safeToken(board)} ${verb} </dev/null >/dev/null && S ok`;
     return this.outcome(await runScript(this.adapter, alias, script, 64 * 1024));
   }
 

@@ -101,6 +101,8 @@ export interface ViewerSettings {
   readonly historyLimit: number;
   /** What a line between two profile cards counts. */
   readonly edgeMode: EdgeMode;
+  /** Notice when a Kanban task gets blocked, gives up, crashes or times out. */
+  readonly kanbanNotify: boolean;
 }
 
 export type EdgeMode = "handoffs" | "comments" | "links" | "all";
@@ -112,6 +114,7 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   persistJobNames: true,
   historyLimit: 50,
   edgeMode: "handoffs",
+  kanbanNotify: true,
 };
 
 /** Discovery result for one server: candidate profiles the user may select. */

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { dropMove, HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
+import { HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
 import { curve, snap } from "../src/hermes/geometry";
 import { parseSections } from "../src/hermes/remote";
 
@@ -62,13 +62,4 @@ test("model catalog parses and setModel writes provider then model via the CLI",
   expect((await client.setModel("h", "xia", "--help", "p")).ok).toBe(false);
   expect((await client.setModel("h", "xia", "m", "-p")).ok).toBe(false);
   expect(sent.length).toBe(count);
-});
-
-test("dropMove maps lanes to CLI verbs", () => {
-  expect(dropMove("running", "done")).toBe("complete");
-  expect(dropMove("done", "blocked")).toBeNull();
-  expect(dropMove("blocked", "ready")).toBe("unblock");
-  expect(dropMove("triage", "ready")).toBe("promote");
-  expect(dropMove("running", "ready")).toBeNull();
-  expect(dropMove("todo", "review")).toBeNull();
 });

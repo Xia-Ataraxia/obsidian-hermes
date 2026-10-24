@@ -14,7 +14,8 @@ import { PluginDataGateway } from "./ui/plugin-data-gateway";
 import { ControlCenterTargets } from "./ui/control-center-targets";
 import { HermesClient } from "./hermes/data";
 import { hues } from "./hermes/geometry";
-import { KANBAN_VIEW, KanbanView } from "./hermes/kanban-view";
+import { KanbanClient, stuck } from "./hermes/kanban";
+import { KANBAN_VIEW, KanbanView, noticeStuck } from "./hermes/kanban-view";
 import { PROFILES_VIEW, ProfilesView } from "./hermes/profiles-view";
 import { HermesView, type HermesHost, type Layout } from "./hermes/ui";
 
@@ -23,6 +24,7 @@ interface PersistedData {
   readonly remoteHomes?: Record<string, string>;
   readonly hermesLayouts?: Record<string, Layout>;
   readonly hermesHues?: Record<string, number>;
+  readonly hermesBoards?: Record<string, string>;
 }
 
 /** Wiring only: construct collaborators, register views and commands, restore persisted data. */
@@ -36,6 +38,13 @@ export default class HermesCronViewerPlugin extends Plugin {
   private store!: SnapshotDiskStore;
   private data!: PluginDataGateway;
   private layouts: Record<string, Layout> = {};
+  private boards: Record<string, string> = {};
+  /** Watcher cursors per host and board; in memory only. */
+  private cursors: Record<string, Record<string, number>> = {};
+  private readonly watching = new Set<string>();
+  /** Set first in onunload(), so a watcher read still in flight writes no cursors and shows no notices. */
+  private unloaded = false;
+  private kanban!: KanbanClient;
   readonly processes = new ControlCenterProcesses();
   readonly targets = new ControlCenterTargets({
     settings: () => this.settings,
@@ -51,9 +60,11 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
     this.remoteHomes = { ...(data.remoteHomes ?? {}) };
     this.layouts = { ...(data.hermesLayouts ?? {}) };
+    this.boards = { ...(data.hermesBoards ?? {}) };
     for (const [id, h] of Object.entries(data.hermesHues ?? {})) hues.set(id, h);
 
     this.adapter = new SshReadOnlyAdapter({ runner: this.processes.runner });
+    this.kanban = new KanbanClient(this.adapter, new SshReadOnlyAdapter({ runner: this.processes.runner, timeoutMs: 120_000 }));
     this.state = new ViewerState(this.adapter, this.settings, this.logger);
     for (const [alias, home] of Object.entries(this.remoteHomes)) {
       this.state.rememberHome(alias, home);
@@ -111,6 +122,12 @@ export default class HermesCronViewerPlugin extends Plugin {
       edgeMode: () => this.settings.edgeMode,
       setEdgeMode: mode => this.setEdgeMode(mode),
       openSettings: () => this.openSettings(),
+      kanban: this.kanban,
+      board: alias => this.boards[alias] ?? "default",
+      saveBoard: (alias, slug) => {
+        this.boards[alias] = slug;
+        void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesBoards: this.boards }));
+      },
     };
     this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
     this.registerView(PROFILES_VIEW, leaf => new ProfilesView(leaf, host));
@@ -118,11 +135,14 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.addRibbonIcon("network", "Hermes: Profiles", () => void this.openHermes(PROFILES_VIEW));
     this.addCommand({ id: "open-hermes-kanban", name: "Open kanban", callback: () => void this.openHermes(KANBAN_VIEW) });
     this.addCommand({ id: "open-hermes-profiles", name: "Open profiles", callback: () => void this.openHermes(PROFILES_VIEW) });
+    this.app.workspace.onLayoutReady(() => this.watch());
+    this.registerInterval(window.setInterval(() => this.watch(), 60_000));
 
     this.addSettingTab(new HermesCronSettingsTab(this.app, this));
   }
 
   override async onunload(): Promise<void> {
+    this.unloaded = true;
     this.targets.dispose();
     this.scheduler.stop();
     this.state.bodies.clear();
@@ -161,6 +181,8 @@ export default class HermesCronViewerPlugin extends Plugin {
 
   async forgetServer(alias: string): Promise<void> {
     delete this.remoteHomes[alias];
+    delete this.boards[alias];
+    delete this.cursors[alias];
     this.state.forgetServer(alias);
     await this.store.removeServer(alias);
     await this.persist();
@@ -185,6 +207,7 @@ export default class HermesCronViewerPlugin extends Plugin {
       remoteHomes: this.remoteHomes,
       hermesLayouts: this.layouts,
       hermesHues: Object.fromEntries(hues),
+      hermesBoards: this.boards,
     }) : current);
   }
 
@@ -209,11 +232,26 @@ export default class HermesCronViewerPlugin extends Plugin {
     for (const leaf of this.app.workspace.getLeavesOfType(PROFILES_VIEW)) if (leaf.view instanceof ProfilesView) leaf.view.redrawEdges();
   }
 
-  /** Kanban and profiles open as main-area tabs, one leaf each; `alias` picks the SSH host. */
-  async openHermes(viewType: string, alias?: string): Promise<void> {
+  /** Kanban and profiles open as main-area tabs, one leaf each; `alias` picks the SSH host, `extra` e.g. a board and task. */
+  async openHermes(viewType: string, alias?: string, extra: Record<string, unknown> = {}): Promise<void> {
     const leaf = this.app.workspace.getLeavesOfType(viewType)[0] ?? this.app.workspace.getLeaf("tab");
-    await leaf.setViewState({ type: viewType, active: true, state: alias ? { alias } : {} });
+    await leaf.setViewState({ type: viewType, active: true, state: { ...(alias ? { alias } : {}), ...extra } });
     await this.app.workspace.revealLeaf(leaf);
+  }
+
+  /** Stuck-task notices for every board on every host; the first read of a board only seeds its cursor. */
+  private watch(): void {
+    if (!this.settings.kanbanNotify) { this.cursors = {}; return; }
+    for (const alias of this.settings.servers) {
+      if (this.watching.has(alias)) continue;
+      this.watching.add(alias);
+      void this.kanban.events(alias, this.cursors[alias] ?? {}).then(feed => {
+        if (this.unloaded || !feed || !this.settings.kanbanNotify || !this.settings.servers.includes(alias)) return;
+        const { alerts, next } = stuck(feed, this.cursors[alias] ?? {}, this.kanban.mine, Date.now());
+        this.cursors[alias] = next;
+        noticeStuck(alerts, (board, task) => void this.openHermes(KANBAN_VIEW, alias, task ? { board, task } : { board }));
+      }).finally(() => this.watching.delete(alias));
+    }
   }
 
   private openSettings(): void {
