@@ -37,6 +37,8 @@ Monitor and manage [Hermes Agent](https://github.com/NousResearch/hermes-agent) 
 
 ## Development
 
+Source code and issues: [github.com/Xia-Ataraxia/obsidian-hermes](https://github.com/Xia-Ataraxia/obsidian-hermes).
+
 ```sh
 bun install
 bun run build      # writes main.js and styles.css

@@ -148,15 +148,3 @@ export interface SchedulerClock {
   readonly setInterval: (handler: () => void, ms: number) => number;
   readonly clearInterval: (handle: number) => void;
 }
-
-/** Round-level counters. Bodies are never recorded, only shapes and classifications. */
-export interface RoundCounters {
-  sources: number;
-  commands: number;
-  durationMs: number;
-  parseFailures: number;
-  timezoneUnknown: number;
-  ledgerUnavailable: number;
-  capExceeded: number;
-  rejectedCommands: number;
-}

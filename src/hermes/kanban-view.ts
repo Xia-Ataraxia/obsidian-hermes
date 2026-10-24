@@ -536,6 +536,8 @@ export class KanbanView extends HermesView {
       ask(this.app, {
         title: settings ? "Board settings" : "New board",
         cta: settings ? "Save" : "Create",
+        // The CLI can neither bind nor unbind a project, and no read here names it, so the id is shown as is.
+        ...(settings && meta?.project ? { text: `Bound to project ${meta.project}; new tasks on this board inherit it. Change the binding in the Hermes dashboard.` } : {}),
         fields: [
           { key: "name", label: "Name", required: true, value: val(meta?.name) },
           ...(settings ? [] : [{ key: "slug", label: "Slug", required: true, desc: "Lowercase letters, digits, - and _" }]),

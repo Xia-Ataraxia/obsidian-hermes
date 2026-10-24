@@ -789,6 +789,12 @@
   margin: 0;
 }
 
+.hcv-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
 .hcv-detail-meta-item {
   font-family: var(--font-monospace);
 }

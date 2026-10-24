@@ -123,4 +123,4 @@ export interface SshAdapterOptions {
   readonly timeoutMs?: number;
 }
 
-export type LogLevel = "info" | "warn" | "error";
+export type LogLevel = "warn" | "error";

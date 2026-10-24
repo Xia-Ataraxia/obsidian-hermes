@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { Modal, Notice, setTooltip, ToggleComponent, type App } from "obsidian";
+import type { Outcome } from "../hermes/data";
 import type { CronJobRecord, OutputFileIndex, ProfileRef } from "../types/hermes-cron";
 import type { LedgerReadResult } from "../types/snapshot";
 import { buildListOutputFiles } from "../domain/read-command-builder";
@@ -31,6 +32,9 @@ export class JobDetailModal extends Modal {
   // Until the first read returns, an empty ledger/index is unknown, not "there is nothing".
   private loading = true;
   private closed = false;
+  // The switch shows the state Hermes last confirmed and stays disabled while a change is in flight.
+  private on: boolean;
+  private switching = false;
 
   constructor(
     app: App,
@@ -39,8 +43,10 @@ export class JobDetailModal extends Modal {
     private readonly adapter: SshReadOnlyAdapter,
     private readonly bodies: VerbatimMemoryStore,
     private readonly historyLimit: number,
+    private readonly setEnabled: (on: boolean) => Promise<Outcome>,
   ) {
     super(app);
+    this.on = job.enabled !== false;
     this.reader = new OutputReaderState(profile, job.id, adapter, bodies, () => this.render());
   }
 
@@ -114,6 +120,18 @@ export class JobDetailModal extends Modal {
     this.render();
   }
 
+  /** Pause or resume the job; a failure keeps the old state and says why. */
+  private flip(on: boolean): void {
+    this.switching = true;
+    this.render();
+    void this.setEnabled(on).then(outcome => {
+      this.switching = false;
+      if (outcome.ok) this.on = on;
+      else new Notice(outcome.message);
+      this.render();
+    });
+  }
+
   private selectTab(id: JobTabId, fromKeyboard: boolean): void {
     this.activeTab = id;
     this.focusTab = fromKeyboard;
@@ -132,7 +150,12 @@ export class JobDetailModal extends Modal {
     }
 
     const header = root.createDiv({ cls: "hcv-detail-header" });
-    header.createEl("h2", { cls: "hcv-detail-title", text: this.job.name ?? this.job.id });
+    const heading = header.createDiv({ cls: "hcv-detail-heading" });
+    heading.createEl("h2", { cls: "hcv-detail-title", text: this.job.name ?? this.job.id });
+    const locked = this.job.state === "completed" ? "Completed one-shot job" : null;
+    const toggle = new ToggleComponent(heading).setValue(this.on).setDisabled(this.switching || locked !== null).onChange(on => this.flip(on));
+    const tip = locked ?? (this.on ? null : "Schedules the next occurrence; a run missed while paused may fire once.");
+    if (tip) setTooltip(toggle.toggleEl, tip);
     const meta = header.createDiv({ cls: "hcv-detail-meta" });
     meta.createSpan({ cls: "hcv-detail-meta-item", text: `id ${this.job.id}` });
     meta.createSpan({

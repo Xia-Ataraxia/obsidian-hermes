@@ -16,8 +16,6 @@ import { isUsableRead } from "../domain/read-usability";
 import { SourceStatusTracker } from "./source-status-tracker";
 import type { ViewerFilter } from "../types/view";
 import { selectedProfileRefs, selectedProfileFor } from "../domain/viewer-selected-profiles";
-import type { Logger } from "../utils/logger";
-import { emptyCounters } from "../utils/logger";
 
 export const EMPTY_FILTER: ViewerFilter = { alias: null, profileId: null, text: "" };
 
@@ -48,7 +46,6 @@ export class ViewerState {
   constructor(
     readonly adapter: SshReadOnlyAdapter,
     private settings: ViewerSettings,
-    private readonly logger: Logger,
   ) {}
 
   /** Install the disk projection sink. Bodies never reach it: the projection drops them. */
@@ -172,8 +169,6 @@ export class ViewerState {
 
     this.refreshing = true;
     this.notifyAll();
-    const counters = emptyCounters();
-    const startedAt = Date.now();
     try {
       const collected = await collectRound(this.adapter, profiles, {
         historyLimit: this.settings.historyLimit,
@@ -207,20 +202,9 @@ export class ViewerState {
           isCurrent,
         );
       }
-      counters.sources = collected.length;
-      counters.parseFailures = collected.filter(
-        (item) => item.snapshot.sourceStatus === "parse-failed",
-      ).length;
-      counters.capExceeded = collected.filter(
-        (item) => item.snapshot.sourceStatus === "cap-exceeded",
-      ).length;
-      counters.ledgerUnavailable = collected.filter((item) => item.ledger.status !== "read").length;
-      counters.commands = collected.length * 3;
     } finally {
       if (isCurrent()) {
-        counters.durationMs = Date.now() - startedAt;
         this.refreshing = false;
-        this.logger.round(counters);
         this.notifyAll();
       }
     }

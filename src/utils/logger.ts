@@ -1,28 +1,13 @@
 import type { LogLevel } from "../types/contracts";
-import type { RoundCounters } from "../types/view";
-
-
-export function emptyCounters(): RoundCounters {
-  return {
-    sources: 0,
-    commands: 0,
-    durationMs: 0,
-    parseFailures: 0,
-    timezoneUnknown: 0,
-    ledgerUnavailable: 0,
-    capExceeded: 0,
-    rejectedCommands: 0,
-  };
-}
 
 /**
- * Structured logger for the plugin.
+ * Structured logger for the plugin. Only warnings and errors reach the console.
  *
  * Callers pass identifiers, counts and classifications only. Prompts, replies, error bodies and
  * file contents must never reach this surface.
  */
 export class Logger {
-  constructor(private readonly prefix = "HermesCronViewer") {}
+  constructor(private readonly prefix = "Hermes Control Center") {}
 
   private emit(level: LogLevel, message: string, fields: Record<string, string | number | boolean>): void {
     const rendered = Object.entries(fields)
@@ -30,12 +15,7 @@ export class Logger {
       .join(" ");
     const line = `[${this.prefix}] ${level} | ${message}${rendered === "" ? "" : ` | ${rendered}`}`;
     if (level === "error") console.error(line);
-    else if (level === "warn") console.warn(line);
-    else console.debug(line);
-  }
-
-  info(message: string, fields: Record<string, string | number | boolean> = {}): void {
-    this.emit("info", message, fields);
+    else console.warn(line);
   }
 
   warn(message: string, fields: Record<string, string | number | boolean> = {}): void {
@@ -44,9 +24,5 @@ export class Logger {
 
   error(message: string, fields: Record<string, string | number | boolean> = {}): void {
     this.emit("error", message, fields);
-  }
-
-  round(counters: RoundCounters): void {
-    this.info("collection round", { ...counters });
   }
 }

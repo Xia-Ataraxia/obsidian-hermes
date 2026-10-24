@@ -1,6 +1,5 @@
 import { ItemView, type WorkspaceLeaf } from "obsidian";
-import type { CronJobRecord } from "../types/hermes-cron";
-import { JobDetailModal } from "./job-detail-modal";
+import type { CronJobRecord, ProfileRef } from "../types/hermes-cron";
 import { buildWeekGrid } from "../domain/week-grid-builder";
 import type { DayColumn, PlacedEntry, RuleChip } from "../types/view";
 import { groupSourceStatuses } from "../domain/source-status-groups";
@@ -41,7 +40,7 @@ function makeActivatable(el: HTMLElement, action: () => void): void {
 export class WeekCalendarView extends ItemView {
   private unsubscribe: (() => void) | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState) {
+  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void) {
     super(leaf);
   }
 
@@ -65,15 +64,7 @@ export class WeekCalendarView extends ItemView {
 
   private openDetail(job: CronJobRecord): void {
     const profile = this.state.profileFor(job.source);
-    if (profile === undefined) return;
-    new JobDetailModal(
-      this.app,
-      job,
-      profile,
-      this.state.adapter,
-      this.state.bodies,
-      this.state.getSettings().historyLimit,
-    ).open();
+    if (profile !== undefined) this.openJob(job, profile);
   }
 
   override async onClose(): Promise<void> {

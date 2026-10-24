@@ -24,6 +24,8 @@ import { HermesView, type HermesHost, type Layout } from "./hermes/ui";
 import { HermesChat } from "./hermes/chat";
 import { CHAT_VIEW, ChatView } from "./hermes/chat-view";
 import { JobDetailModal } from "./ui/job-detail-modal";
+import { message } from "./hermes/kanban-drawer";
+import type { CronJobRecord, ProfileRef } from "./types/hermes-cron";
 
 interface PersistedData {
   readonly settings?: Partial<ViewerSettings>;
@@ -85,7 +87,7 @@ export default class HermesCronViewerPlugin extends Plugin {
     // The views' last-seen data, under the plugin folder. It follows "Store job names on disk": when that is off, nothing is read or written.
     const dir = this.manifest.dir;
     this.cache = diskCache(this.app.vault.adapter, dir ? `${dir}/cache` : null, () => this.settings.persistJobNames);
-    this.state = new ViewerState(this.adapter, this.settings, this.logger);
+    this.state = new ViewerState(this.adapter, this.settings);
     for (const [alias, home] of Object.entries(this.remoteHomes)) {
       this.state.rememberHome(alias, home);
     }
@@ -100,8 +102,20 @@ export default class HermesCronViewerPlugin extends Plugin {
     );
     this.state.scheduler = this.scheduler;
 
-    this.registerView(TODAY_TIMELINE_VIEW, (leaf) => new TodayTimelineView(leaf, this.state));
-    this.registerView(WEEK_CALENDAR_VIEW, (leaf) => new WeekCalendarView(leaf, this.state));
+    // One client for the popup and the job modal, so their writes to a profile queue behind each other.
+    const inspect = new InspectClient(this.adapter);
+    const openJob = (job: CronJobRecord, profile: ProfileRef): void => {
+      // A switch flipped after this host was edited or removed in settings sends nothing.
+      const generation = this.targets.generation(profile.alias);
+      new JobDetailModal(this.app, job, profile, this.adapter, this.state.bodies, this.settings.historyLimit, async on => {
+        if (generation !== this.targets.generation(profile.alias) || !this.settings.servers.includes(profile.alias)) return { ok: false, message: "The SSH host changed; open it again." };
+        const outcome = await inspect.toggleJob(profile.alias, profile.profileId, job.id, on).catch((error: unknown) => ({ ok: false as const, message: message(error) }));
+        if (outcome.ok) this.scheduler.trigger();
+        return outcome;
+      }).open();
+    };
+    this.registerView(TODAY_TIMELINE_VIEW, (leaf) => new TodayTimelineView(leaf, this.state, openJob));
+    this.registerView(WEEK_CALENDAR_VIEW, (leaf) => new WeekCalendarView(leaf, this.state, openJob));
 
     this.addRibbonIcon("clock", "Hermes: Today", () => {
       void this.activateView(TODAY_TIMELINE_VIEW, "right", true);
@@ -149,9 +163,9 @@ export default class HermesCronViewerPlugin extends Plugin {
         this.boards[alias] = slug;
         void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesBoards: this.boards }));
       },
-      inspect: new InspectClient(this.adapter),
+      inspect,
       cache: this.cache,
-      openJob: (job, profile) => new JobDetailModal(this.app, job, profile, this.adapter, this.state.bodies, this.settings.historyLimit).open(),
+      openJob,
       openChat: (alias, profile) => void this.activateView(CHAT_VIEW, "right").then(() => {
         const view = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0]?.view;
         if (view instanceof ChatView) view.focusProfile(alias, profile);
@@ -184,7 +198,6 @@ export default class HermesCronViewerPlugin extends Plugin {
 
   private async stopProcesses(): Promise<void> {
     await this.processes.dispose();
-    this.logger.info("unloaded");
   }
 
   async saveSettings(settings: ViewerSettings): Promise<void> {

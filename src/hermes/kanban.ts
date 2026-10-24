@@ -15,7 +15,7 @@ export interface Card {
   failures?: number; lastError?: string; heartbeatAt?: number; maxRuntime?: number; pid?: number; claimExpires?: number;
   comments?: number; parents?: number; children?: number; childrenDone?: number; text?: string; reason?: string;
 }
-export interface BoardMeta { slug: string; name: string; description?: string; icon?: string; color?: string; workdir?: string; archived: boolean; counts: Partial<Record<Status, number>> }
+export interface BoardMeta { slug: string; name: string; description?: string; icon?: string; color?: string; workdir?: string; project?: string; archived: boolean; counts: Partial<Record<Status, number>> }
 /** One board pull; `tasks` is the previous list when the token showed nothing changed. */
 export interface BoardRead { board: string; token: string | null; boards: BoardMeta[]; profiles: string[]; config: Record<string, string>; tasks: Card[] }
 
@@ -192,10 +192,10 @@ export function parseBoard(sections: Sections, previous: Card[] = []): BoardRead
   for (const [section, text] of sections) {
     if (!section.startsWith("meta ")) continue;
     const slug = section.slice(5), meta = obj(text);
-    const description = str(meta.description), icon = str(meta.icon), color = str(meta.color), workdir = str(meta.default_workdir);
+    const description = str(meta.description), icon = str(meta.icon), color = str(meta.color), workdir = str(meta.default_workdir), project = str(meta.project_id);
     boards.push({
       slug, name: str(meta.name).trim() || (slug === "default" ? "Default" : slug),
-      ...(description ? { description } : {}), ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(workdir ? { workdir } : {}),
+      ...(description ? { description } : {}), ...(icon ? { icon } : {}), ...(color ? { color } : {}), ...(workdir ? { workdir } : {}), ...(project ? { project } : {}),
       archived: meta.archived === true, counts: obj(sections.get(`counts ${slug}`)),
     });
   }

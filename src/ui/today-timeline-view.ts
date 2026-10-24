@@ -1,6 +1,5 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import type { CronJobRecord } from "../types/hermes-cron";
-import { JobDetailModal } from "./job-detail-modal";
+import type { CronJobRecord, ProfileRef } from "../types/hermes-cron";
 import { buildTodayColumn } from "../domain/week-grid-builder";
 import type { PlacedEntry, TimelineNowHost } from "../types/view";
 import { renderFilterBar } from "./filter-bar";
@@ -38,7 +37,7 @@ export class TodayTimelineView extends ItemView {
     () => this.render(),
   );
 
-  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState) {
+  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void) {
     super(leaf);
   }
 
@@ -63,15 +62,7 @@ export class TodayTimelineView extends ItemView {
 
   private openDetail(job: CronJobRecord): void {
     const profile = this.state.profileFor(job.source);
-    if (profile === undefined) return;
-    new JobDetailModal(
-      this.app,
-      job,
-      profile,
-      this.state.adapter,
-      this.state.bodies,
-      this.state.getSettings().historyLimit,
-    ).open();
+    if (profile !== undefined) this.openJob(job, profile);
   }
 
   override async onClose(): Promise<void> {

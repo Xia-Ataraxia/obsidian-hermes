@@ -56,7 +56,7 @@ export function renderCronExecutionDefinition(parent: CronDefinitionElement, job
     value.createEl("pre", { text: fieldText(field), cls: "hcv-verbatim" });
   }
   section.createEl("p", { text: `Native skill selection: ${definition.skillSource}; ${definition.selectedSkills === null ? "unknown" : JSON.stringify(definition.selectedSkills)}. Non-null skills takes precedence, including an empty list or string; the loader trims and deduplicates.` });
-  section.createEl("p", { text: "Empty authored toolsets means zero tools, including MCP. Nonempty overrides may merge configured MCP; denylists still apply. Missing configuration remains unknown." });
+  section.createEl("p", { text: "Empty authored toolsets means zero tools, even server:tool ones. Nonempty overrides may merge configured server:tool ones; denylists still apply. Missing configuration remains unknown." });
   for (const issue of [...definition.issues, ...job.unparsedFields.map((name) => `unparsed:${name}`)]) {
     section.createEl("p", { text: issue, attr: { "data-definition-issue": issue } });
   }
