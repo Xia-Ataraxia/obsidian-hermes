@@ -1657,3 +1657,55 @@
 .hm-chat-composer textarea { flex: 1; min-width: 0; max-height: 160px; padding: 6px 10px; border-radius: 8px; font-size: 13px; field-sizing: content; resize: none; }
 /* ponytail: the status bar is fixed over the right split's bottom edge (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */
 .mod-right-split .hm-chat-composer { padding-bottom: 36px; }
+
+/* ═════ Activity pane ═════ */
+.hm-act { --hm-line: var(--background-modifier-border); --hm-soft: color-mix(in srgb, var(--text-normal) 4%, transparent); --hm-good: var(--color-green); --hm-warn: var(--color-orange); --hm-bad: var(--color-red); font-size: var(--font-ui-small); container-type: inline-size; }
+.hm-act-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.hm-act .hm-empty { height: auto; padding: 32px 0; }
+
+.hm-act-row, .hm-act-kid { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--hm-line); }
+.hm-section-head + .hm-act-row, .hm-act-kids > :first-child { border-top: 0; }
+.hm-act-row.is-now { margin-bottom: 4px; padding: 8px 10px; border: 1px solid var(--hm-line); border-radius: 8px; background: var(--hm-soft); }
+.hm-act-row.is-live { border-color: color-mix(in srgb, var(--hm-good) 40%, var(--hm-line)); background: color-mix(in srgb, var(--hm-good) 6%, transparent); }
+.hm-act-name { flex: 1 1 8em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-act-model { flex: 0 1 auto; min-width: 0; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 11px; }
+.hm-act-age { display: inline-flex; gap: 8px; margin-left: auto; color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-act-doing, .hm-act-goal, .hm-act-note { flex: 1 1 100%; min-width: 0; padding-left: 16px; color: var(--text-muted); font-size: 12px; }
+.hm-act-doing { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-act-goal, .hm-act-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.hm-act-note.is-warn { color: var(--hm-warn); }
+.hm-act-note.is-error { color: var(--hm-bad); }
+.hm-act-tail { flex: 1 1 100%; min-width: 0; padding-left: 16px; color: var(--text-muted); font: 11px/1.5 var(--font-monospace); }
+.hm-act-tail > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* dot: hollow until it has a state; stale is dashed, since it is a guess */
+.hm-act-dot { --c: var(--text-faint); flex: none; box-sizing: border-box; width: 8px; height: 8px; border: 1.5px solid var(--c); border-radius: 50%; }
+.hm-act-dot.is-running, .hm-act-dot.is-ended, .hm-act-dot.is-warn, .hm-act-dot.is-live, .hm-act-dot.is-done, .hm-act-dot.is-error { background: var(--c); }
+.hm-act-dot.is-done { --c: var(--hm-good); }
+.hm-act-dot.is-error { --c: var(--hm-bad); }
+.hm-act-dot.is-warn, .hm-act-dot.is-stale { --c: var(--hm-warn); }
+.hm-act-dot.is-stale { border-style: dashed; }
+.hm-act-dot.is-live, .hm-act-dot.is-running { --c: var(--hm-good); }
+.hm-act-dot.is-live, .hm-act-dot.is-running:not(.hm-act-seg) { box-shadow: 0 0 0 3px color-mix(in srgb, var(--hm-good) 22%, transparent); animation: hm-breathe 2.4s ease-in-out infinite; } /* a ring on a bar segment would hit its neighbours */
+.hm-act-bar { display: inline-flex; flex: none; gap: 2px; width: 64px; }
+.hm-act-seg { flex: 1 1 0; min-width: 3px; height: 6px; border-radius: 2px; }
+
+/* the groups reuse the Skills .hm-group; its uppercase label style is off, since titles and durations are text */
+.hm-act .hm-group > summary { color: var(--text-normal); font: inherit; letter-spacing: normal; text-transform: none; }
+/* one line: the title takes what is left and ellipsises, the meta keeps its size */
+.hm-act .hm-group > summary > :not(.hm-act-name) { flex: none; }
+@container (max-width: 520px) { .hm-act .hm-opt { display: none; } } /* narrow: tokens and cost go first, the age stays */
+.hm-act-result > summary::-webkit-details-marker { display: none; }
+.hm-act-kids { margin: 0 12px 8px 18px; padding-left: 10px; border-left: 1px solid var(--hm-line); }
+.hm-act-result { flex: 1 1 100%; padding-left: 16px; font-size: 12px; }
+.hm-act-result > summary { display: inline-flex; align-items: center; gap: 4px; color: var(--text-faint); cursor: pointer; list-style: none; }
+.hm-act-result > summary:hover { color: var(--text-normal); }
+.hm-act-result > div { margin-top: 4px; color: var(--text-muted); }
+
+.hm-act .hm-chip.is-error { --c: var(--hm-bad); }
+.hm-act .hm-chip.is-done { --c: var(--hm-good); }
+.hm-act .hm-chip.is-warn { --c: var(--hm-warn); }
+.hm-act .hm-icon.is-warn { color: var(--hm-warn); }
+@media (prefers-reduced-motion: reduce) {
+  .hm-act *, .hm-act *::before { animation: none !important; transition: none !important; }
+}
