@@ -58,6 +58,16 @@ export default class HermesCronViewerPlugin extends Plugin {
 
   override async onload(): Promise<void> {
     this.data = new PluginDataGateway(this);
+    // ponytail: 1.0.0 renamed the id from hermes-cron-viewer, leaving data.json in the old folder; copied once and
+    // only read there (never written or removed). Can go a few releases on.
+    if ((await this.loadData()) === null) {
+      const legacy = `${this.app.vault.configDir}/plugins/hermes-cron-viewer/data.json`;
+      try {
+        if (await this.app.vault.adapter.exists(legacy)) await this.saveData(JSON.parse(await this.app.vault.adapter.read(legacy)));
+      } catch (error) {
+        this.logger.warn("settings from hermes-cron-viewer not carried over", { error: String(error) });
+      }
+    }
     const data = await this.data.read<PersistedData & Record<string, unknown>>();
     this.settings = { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) };
     this.remoteHomes = { ...(data.remoteHomes ?? {}) };
@@ -226,7 +236,7 @@ export default class HermesCronViewerPlugin extends Plugin {
   setHue(id: string, h: number | null): void {
     if (h === null) hues.delete(id); else hues.set(id, h);
     void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesHues: Object.fromEntries(hues) }));
-    for (const type of [KANBAN_VIEW, PROFILES_VIEW]) {
+    for (const type of [KANBAN_VIEW, PROFILES_VIEW, CHAT_VIEW]) {
       for (const leaf of this.app.workspace.getLeavesOfType(type)) if (leaf.view instanceof HermesView) leaf.view.repaint();
     }
   }

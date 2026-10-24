@@ -1,12 +1,8 @@
-import { AbstractInputSuggest, Component, MarkdownRenderer, Modal, Notice, setTooltip, type App } from "obsidian";
+import { AbstractInputSuggest, Component, Modal, Notice, setTooltip, type App } from "obsidian";
 import type { HermesClient } from "./data";
 import type { Card, Detail, Diagnostic, KanbanClient, NewTask, Status, TaskRow, Verb } from "./kanban";
+import { renderSafe } from "./markdown";
 import { absolute, avatar, compact, icon, iconButton, relative } from "./ui";
-
-/** The one markdown entry point (swapped for the shared safe renderer at merge). */
-export function markdown(app: App, md: string, el: HTMLElement, owner: Component): Promise<void> {
-  return MarkdownRenderer.render(app, md, el, "", owner);
-}
 
 export const message = (e: unknown): string => e instanceof Error ? e.message : String(e);
 
@@ -468,7 +464,7 @@ export class TaskDrawer {
     const t = detail.task, app = this.host.app, top = this.pane.scrollTop;
     if (this.part) this.host.owner.removeChild(this.part);
     const part = this.part = this.host.owner.addChild(new Component());
-    const md = (parent: HTMLElement, text: string): void => { void markdown(app, text, parent.createDiv("hm-doc markdown-rendered"), part); };
+    const md = (parent: HTMLElement, text: string): void => { void renderSafe(app, text, parent.createDiv("hm-doc markdown-rendered"), part); };
     this.renderHead(t);
     this.pane.empty();
 

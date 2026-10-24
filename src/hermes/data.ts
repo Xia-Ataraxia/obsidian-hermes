@@ -55,7 +55,7 @@ select json_object(
      from gw where t is not null));
 SQL
   pid=$(sqlite3 :memory: "select json_extract(cast(readfile('gateway_state.json') as text),'\$.pid')" 2>/dev/null)
-  S "alive $id"; [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo 1
+  S "alive $id"; case $pid in ''|0*|*[!0-9]*) ;; *) kill -0 "$pid" 2>/dev/null && echo 1;; esac
   if [ -f state.db ]; then
     S "usage $id"
     ro state.db <<'SQL'
