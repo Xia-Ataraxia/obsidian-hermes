@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { dropMove, HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
+import { HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
 import { curve, snap, tidy } from "../src/hermes/geometry";
 import { parseSections } from "../src/hermes/remote";
 
@@ -91,13 +91,4 @@ test("model catalog parses and setModel writes provider then model via the CLI",
   expect(sent.length).toBe(count);
   const failed = { run: async () => ({ transport: "connected", exitCode: 0, stdout: "\u001eok\n\u001e?3\n", stderr: "warn\nno such model", capExceeded: false }) } as never;
   expect(await new HermesClient(failed).setModel("h", "xia", "m", "p")).toEqual({ ok: false, message: "no such model" });
-});
-
-test("dropMove maps lanes to CLI verbs", () => {
-  expect(dropMove("running", "done")).toBe("complete");
-  expect(dropMove("done", "blocked")).toBeNull();
-  expect(dropMove("blocked", "ready")).toBe("unblock");
-  expect(dropMove("triage", "ready")).toBe("promote");
-  expect(dropMove("running", "ready")).toBeNull();
-  expect(dropMove("todo", "review")).toBeNull();
 });

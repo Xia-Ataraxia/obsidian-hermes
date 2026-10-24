@@ -101,6 +101,12 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       }
     }
 
+    new Setting(containerEl).setName("Kanban").setHeading();
+    new Setting(containerEl).setName("Notify when a task gets stuck").setDesc("Blocked, gave up, crashed or timed out. Checked every minute.")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.kanbanNotify).onChange(async (value) => {
+        await this.plugin.saveSettings({ ...this.plugin.settings, kanbanNotify: value });
+      }));
+
     new Setting(containerEl).setName("Storage").setHeading();
     this.renderStorage(containerEl);
   }
