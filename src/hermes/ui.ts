@@ -1,7 +1,9 @@
 import { ItemView, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import type { CronJobRecord, ProfileRef } from "../types/hermes-cron";
 import type { EdgeMode } from "../types/snapshot";
 import type { HermesClient } from "./data";
 import { hue } from "./geometry";
+import type { InspectClient } from "./inspect";
 import type { KanbanClient } from "./kanban";
 
 export type Layout = Record<string, [number, number]>;
@@ -20,6 +22,8 @@ export interface HermesHost {
   /** Last board shown on this host ("default" when none). */
   board(alias: string): string;
   saveBoard(alias: string, slug: string): void;
+  readonly inspect: InspectClient;
+  openJob(job: CronJobRecord, profile: ProfileRef): void;
 }
 
 /* ───────────── small DOM helpers ───────────── */

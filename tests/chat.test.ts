@@ -109,7 +109,9 @@ test("stream ends with a null exit on the byte cap or stop, and refuses a cancel
 });
 
 const rendered: string[] = [];
+// bun shares one module registry across test files, so every "obsidian" mock declares the same names (see inspect.test.ts).
 await mock.module("obsidian", () => ({
+  parseYaml: () => ({}),
   MarkdownRenderer: { render: (_app: unknown, _md: string, _el: unknown, sourcePath: string) => void rendered.push(sourcePath) },
 }));
 const { tame, renderSafe, web } = await import("../src/hermes/markdown");

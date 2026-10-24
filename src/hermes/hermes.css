@@ -314,24 +314,23 @@
 .hm-drawer-desc { flex-basis: 100%; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
 .hm-drawer-head .hm-push { align-self: flex-start; }
 
-.hm-tabs { display: flex; flex: none; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--hm-line); }
+.hm-tabs { display: flex; flex: none; flex-direction: column; gap: 2px; width: 180px; padding: 12px 8px; border-right: 1px solid var(--hm-line); overflow-y: auto; }
 .hm-tab {
-  position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 5px;
-  height: 36px;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
   padding: 0 10px !important;
   border: 0 !important;
-  border-radius: 0 !important;
+  border-radius: 6px !important;
   background: none !important;
   box-shadow: none !important;
-  color: var(--text-faint);
+  color: var(--text-muted);
 }
 .hm-tab svg { width: 16px; height: 16px; }
-.hm-tab:hover { color: var(--text-normal); }
-.hm-tab.is-active { color: var(--text-normal); }
-.hm-tab.is-active::after { content: ""; position: absolute; right: 6px; bottom: -1px; left: 6px; height: 2px; border-radius: 2px; background: var(--interactive-accent); }
+.hm-tab:hover, .hm-tab.is-active { background: var(--background-modifier-hover) !important; color: var(--text-normal); }
+.hm-tab-label { flex: 1; text-align: left; }
 .hm-tab-count { color: var(--text-faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
 .hm-pane { flex: 1; min-height: 0; padding: 12px 16px 24px; overflow-y: auto; }
@@ -357,9 +356,14 @@
 .hm-group > summary::before { content: "›"; display: inline-block; transition: transform 0.15s; }
 .hm-group[open] > summary::before { transform: rotate(90deg); }
 .hm-group > summary .hm-count { margin-left: auto; }
-.hm-skill { padding: 8px 12px; border-top: 1px solid var(--hm-line); }
-.hm-skill-name { font-family: var(--font-monospace); font-size: 12px; font-weight: 600; }
-.hm-skill-desc { margin-top: 2px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.hm-row { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.hm-row:hover { background: var(--hm-soft); }
+.hm-group .hm-row { border-top: 1px solid var(--hm-line); border-radius: 0; }
+.hm-plugin + .hm-plugin { border-top: 1px solid var(--hm-line); }
+.hm-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.hm-row-name { font-family: var(--font-monospace); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.hm-row-desc { margin-top: 2px; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.hm-row.is-off .hm-row-name, .hm-row.is-off .hm-row-desc { color: var(--text-faint); }
 
 /* cron */
 .hm-job { margin-bottom: 8px; padding: 10px 12px; border: 1px solid var(--hm-line); border-radius: 10px; }
@@ -408,6 +412,47 @@
 .hm-swatch { width: 8px; height: 8px; border-radius: 2px; }
 .hm-recent-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--hm-line); font-size: 12.5px; }
 .hm-recent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ═════════════ Profile modal ═════════════ */
+
+.modal.hm-profile-modal { width: min(1040px, 94vw); max-width: none; height: min(760px, 88vh); max-height: none; }
+.hm-profile-modal .modal-header { display: none; }
+.hm-profile-modal .modal-content { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.hm-profile-modal .hm-drawer-head { flex: none; padding: 18px 56px 14px 20px; border-bottom: 1px solid var(--hm-line); }
+.hm-profile-modal .hm-drawer-name { display: flex; align-items: center; gap: 8px; }
+.hm-profile-modal .hm-gw { margin-left: 0; }
+.hm-switch { display: flex; gap: 2px; }
+.hm-profile-body { display: flex; flex: 1; min-height: 0; container-type: inline-size; }
+.hm-profile-modal .hm-pane { min-width: 0; padding: 16px 24px 24px; }
+.hm-profile-modal .hm-doc-bar { top: -16px; margin: -16px -24px 12px; padding: 8px 16px 8px 24px; }
+@container (max-width: 720px) {
+  .hm-tabs { width: auto; }
+  .hm-tab { justify-content: center; }
+  .hm-tab-label, .hm-tab-count { display: none; }
+}
+.hm-pane-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+.hm-pane-tools .hm-search { flex: 1; }
+.hm-icon-btn.is-active { color: var(--interactive-accent); }
+.hm-src { color: var(--text-faint); }
+.hm-warn { color: var(--hm-warn); }
+.hm-src svg, .hm-warn svg { width: 13px; height: 13px; }
+.hm-toggle { display: inline-flex; flex: none; }
+.hm-job > summary, .hm-plugin > summary { list-style: none; cursor: pointer; }
+.hm-job > summary::-webkit-details-marker, .hm-plugin > summary::-webkit-details-marker { display: none; }
+.hm-runs, .hm-job-foot { margin: 8px 0 0 16px; }
+.hm-job-foot button { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.hm-exec { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hm-exec-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--hm-good); }
+.hm-exec.is-failed .hm-exec-dot { background: var(--hm-bad); }
+.hm-exec.is-running .hm-exec-dot, .hm-exec.is-claimed .hm-exec-dot { background: var(--color-blue); }
+.hm-exec.is-unknown .hm-exec-dot, .hm-exec.is-unknown-value .hm-exec-dot, .hm-exec.is-absent .hm-exec-dot { background: var(--text-faint); }
+.hm-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin-top: 8px; font-size: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.hm-foot { margin-top: 14px; font-size: 12px; }
+.hm-hint { margin-bottom: 10px; color: var(--text-muted); font-size: 12px; }
+.hm-skill-src { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+.hm-doc-title { font-weight: 600; }
+.hm-skeleton { height: 44px; margin-bottom: 8px; border-radius: 8px; background: linear-gradient(90deg, var(--hm-soft) 25%, var(--background-modifier-hover) 50%, var(--hm-soft) 75%); background-size: 200% 100%; animation: hm-shimmer 1.2s linear infinite; }
+@keyframes hm-shimmer { to { background-position: -200% 0; } }
 
 /* ═════════════ Kanban ═════════════ */
 

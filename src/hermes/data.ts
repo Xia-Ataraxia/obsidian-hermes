@@ -174,7 +174,7 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
       provider: yamlField(model.replace(/^ {2}/gm, ""), "provider"),
       skills: (row.skills ?? []).map(([name, category, description]) => ({ name, category: category ?? "other", description: description ?? "" })),
       jobs: (row.jobs ?? []).map(job => ({
-        id: job.id, name: job.name || job.id, schedule: job.schedule ?? "", enabled: job.enabled === true || job.enabled === 1,
+        id: job.id, name: job.name || job.id, schedule: job.schedule ?? "", enabled: job.enabled !== false && job.enabled !== 0,
         state: job.state, next: job.next, last: job.last, status: job.status, error: job.error, deliver: job.deliver,
         skills: job.skills ?? [], prompt: job.prompt ?? "",
       })),
