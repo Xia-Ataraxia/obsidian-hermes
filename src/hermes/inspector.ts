@@ -1,9 +1,12 @@
-import { Component, MarkdownRenderer, Menu, Modal, Notice, Scope, SuggestModal, ToggleComponent, setTooltip, type App, type ItemView } from "obsidian";
+import { Component, Menu, Modal, Notice, Scope, SuggestModal, ToggleComponent, setTooltip, type App, type ItemView } from "obsidian";
 import { resolveInstant } from "../domain/instant-timezone-resolver";
 import type { LedgerReadResult } from "../types/snapshot";
 import { SOURCE_LABEL } from "../ui/notices";
+import { ActivityPane } from "./activity-pane";
 import type { CronJob, Outcome, Profile } from "./data";
 import { byLeastRecent, EDIT_CAP, pluginLastUsed, type Detail, type PluginInfo, type SkillInfo, type Source, type ToolUse } from "./inspect";
+import { confirmed } from "./kanban-drawer";
+import { renderSafe } from "./markdown";
 import { absolute, avatar, type HermesHost, icon, iconButton, relative, stat } from "./ui";
 
 type Pair = [model: string, provider: string];
@@ -31,24 +34,6 @@ class ModelPicker extends SuggestModal<Pair> {
   }
 
   onChooseSuggestion(pair: Pair): void { void this.pick(pair); }
-}
-
-/** A two-button question stacked over the profile modal; closing it any other way counts as no. */
-class Confirm extends Modal {
-  private done = false;
-  constructor(app: App, private readonly text: string, private readonly label: string, private readonly yes: () => void, private readonly no?: () => void) { super(app); }
-
-  override onOpen(): void {
-    this.contentEl.createEl("p", { text: this.text });
-    const buttons = this.contentEl.createDiv("modal-button-container");
-    buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
-    buttons.createEl("button", { cls: "mod-cta", text: this.label }).addEventListener("click", () => { this.done = true; this.close(); this.yes(); });
-  }
-
-  override onClose(): void {
-    if (!this.done) this.no?.();
-    this.contentEl.empty();
-  }
 }
 
 type FileRead = { readonly text: string; readonly sum: string };
@@ -148,6 +133,11 @@ export class ProfileModal extends Modal {
   private rail!: HTMLElement;
   private pane!: HTMLElement;
   private readonly tabs: readonly Tab[] = [
+    { id: "activity", icon: "activity", label: "Activity", render: el => {
+      const pane = new ActivityPane(this.host.activity, this.alias, this.profileId);
+      pane.mount(el);
+      this.owner.register(() => pane.dispose());
+    } },
     { id: "skills", icon: "sparkles", label: "Skills", render: el => this.renderSkills(el),
       count: () => this.detail ? `${this.detail.skills.filter(skill => skill.enabled).length}/${this.detail.skills.length}` : String(this.profile.skills.length || "") },
     { id: "cron", icon: "alarm-clock", label: "Cron", live: true, render: el => this.renderCron(el), count: () => String(this.profile.jobs.length || "") },
@@ -218,7 +208,7 @@ export class ProfileModal extends Modal {
     if (!this.dirty()) { this.editor = null; go(); return; }
     if (this.asking) return;
     this.asking = true;
-    new Confirm(this.app, DISCARD, "Discard", () => { this.asking = false; this.editor = null; go(); }, () => { this.asking = false; }).open();
+    void confirmed(this.app, DISCARD, "", "Discard", true).then(ok => { this.asking = false; if (ok) { this.editor = null; go(); } });
   }
 
   private dirty(): boolean { return !!this.editor && this.editor.area.value !== this.editor.original; }
@@ -274,9 +264,10 @@ export class ProfileModal extends Modal {
       stat(meta, state === "connected" ? "wifi" : "wifi-off", platform, `${platform} · ${state}`, state === "connected" ? "is-good" : "is-muted");
     }
     const peers = this.peers();
+    const nav = head.createDiv("hm-switch hm-push");
+    iconButton(nav, "message-square", "Chat with this profile", () => this.guard(() => { this.close(); this.host.openChat(this.alias, this.profile.id); }));
     if (peers.length > 1) {
       const at = peers.findIndex(peer => peer.id === profile.id);
-      const nav = head.createDiv("hm-switch hm-push");
       for (const [step, glyph, label] of [[-1, "chevron-left", "Previous profile"], [1, "chevron-right", "Next profile"]] as const) {
         const peer = peers[(at + step + peers.length) % peers.length]!;
         iconButton(nav, glyph, `${label} (${peer.id})`, () => this.guard(() => this.switchTo(peer)));
@@ -382,11 +373,6 @@ export class ProfileModal extends Modal {
       show();
     });
     return details;
-  }
-
-  /** The one markdown render in this file; the merge swaps in the shared safe renderer. */
-  private markdown(md: string, el: HTMLElement): void {
-    void MarkdownRenderer.render(this.app, md, el, "", this.owner);
   }
 
   /* ───────────── skills ───────────── */
@@ -535,7 +521,7 @@ export class ProfileModal extends Modal {
       if (lock) setTooltip(edit, lock);
       loaded = file;
       const text = skill ? file.text.replace(FRONTMATTER, "") : file.text;
-      if (text.trim()) this.markdown(text, body); else body.createDiv({ cls: "hm-muted", text: "Empty" });
+      if (text.trim()) void renderSafe(this.app, text, body, this.owner); else body.createDiv({ cls: "hm-muted", text: "Empty" });
     });
   }
 
@@ -691,9 +677,10 @@ export class ProfileModal extends Modal {
   private confirmPlugin(plugin: PluginInfo, on: boolean, last: number | null): void {
     const key = `plugin:${plugin.key}`;
     const rel = last === null ? null : relative(last, this.now);
-    const text = `${on ? "Enable" : "Disable"} ${plugin.name}? Hermes reloads the running gateway, which serves all profiles. Applies to new sessions.`
+    const text = "Hermes reloads the running gateway, which serves all profiles. Applies to new sessions."
       + (rel ? ` Last used ${rel === "now" ? "just now" : `${rel} ago`}.` : "");
-    new Confirm(this.app, text, on ? "Enable" : "Disable", () => {
+    void confirmed(this.app, `${on ? "Enable" : "Disable"} ${plugin.name}?`, text, on ? "Enable" : "Disable").then(ok => {
+      if (!ok) { if (this.opened) this.renderPane(true); return; }
       this.overrides.set(key, on);
       const { alias, profileId } = this;
       void this.host.inspect.togglePlugin(alias, profileId, plugin, on).catch(fail).then(outcome => {
@@ -705,7 +692,7 @@ export class ProfileModal extends Modal {
         this.renderRail();
         if (!this.editor) this.renderPane(true);
       });
-    }, () => { if (this.opened) this.renderPane(true); }).open();
+    });
   }
 }
 

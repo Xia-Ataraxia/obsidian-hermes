@@ -248,6 +248,7 @@
 .hm-chip.is-review { --c: var(--color-purple); }
 .hm-chip.is-blocked { --c: var(--hm-bad); }
 .hm-chip.is-done7d { --c: var(--hm-good); }
+.hm-chip.is-busy { --c: var(--hm-good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 45%, transparent); animation: hm-pulse 2.2s ease-out infinite; }
 
 .hm-card-foot { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--hm-line); }
 .hm-card-foot .hm-stat { font-size: 11px; }

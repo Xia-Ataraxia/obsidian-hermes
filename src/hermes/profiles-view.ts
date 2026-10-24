@@ -184,6 +184,7 @@ export class ProfilesView extends HermesView {
     if ((usage?.cost7d ?? 0) > 0) stat(numbers, "dollar-sign", usage!.cost7d.toFixed(usage!.cost7d < 10 ? 2 : 0), "Cost · 7d");
 
     const load = el.createDiv("hm-card-load");
+    if ((usage?.busy ?? 0) > 0) stat(load, "zap", usage!.busy, `Running now${usage!.recent[0] ? `\n${usage!.recent[0][0]}` : ""}`, "hm-chip is-busy");
     for (const [key, name, label] of LOAD) {
       const count = profile.load[key];
       if (count > 0) stat(load, name, count, label, `hm-chip is-${key}`);

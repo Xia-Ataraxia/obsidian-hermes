@@ -1,5 +1,6 @@
 import type { SshReadOnlyAdapter } from "../ui/ssh-read-only-adapter";
-import { json, runScript, safeToken, type Sections } from "./remote";
+import { profileDir } from "./data";
+import { json, runScript, type Sections } from "./remote";
 
 /* ───────────────────────── Activity ───────────────────────── */
 
@@ -157,14 +158,9 @@ select json_group_array(json_object(
       from json_each(x.content, '$.goals') g) end)))
 from (select * from x order by id desc) x;`;
 
-// merge: profileDir (same as data.ts; drop this copy once that one is exported)
-function dir(id: string): string {
-  return id === "default" ? `"$H"` : `"$H/profiles/${safeToken(id)}"`;
-}
-
 /** No state.db means no output and exit 0; a failed query prints `null` so that it reads as an error. */
 export function activityScript(profile: string): string {
-  return `cd ${dir(profile)} 2>/dev/null && [ -f state.db ] || exit 0
+  return `cd ${profileDir(profile)} 2>/dev/null && [ -f state.db ] || exit 0
 S activity
 ro state.db <<'SQL' || echo null
 ${ACTIVITY_SQL}
@@ -182,7 +178,7 @@ const SID = /^[A-Za-z0-9_.:-]{1,128}$/;
 /** The id is quoted into the SQL, so it must pass SID first. */
 export function detailScript(profile: string, sid: string): string {
   if (!SID.test(sid)) throw new Error(`Unsafe session id: ${sid}`);
-  return `cd ${dir(profile)} 2>/dev/null && [ -f state.db ] || exit 0
+  return `cd ${profileDir(profile)} 2>/dev/null && [ -f state.db ] || exit 0
 S detail
 ro state.db <<'SQL' || echo null
 ${DETAIL_SQL.replaceAll(":sid", `'${sid}'`)}

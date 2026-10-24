@@ -12,6 +12,7 @@ import { RefreshScheduler } from "./ui/refresh-scheduler";
 import { SnapshotDiskStore } from "./ui/snapshot-disk-store";
 import { PluginDataGateway } from "./ui/plugin-data-gateway";
 import { ControlCenterTargets } from "./ui/control-center-targets";
+import { ActivityClient } from "./hermes/activity";
 import { HermesClient } from "./hermes/data";
 import { hues } from "./hermes/geometry";
 import { InspectClient } from "./hermes/inspect";
@@ -145,6 +146,11 @@ export default class HermesCronViewerPlugin extends Plugin {
       },
       inspect: new InspectClient(this.adapter),
       openJob: (job, profile) => new JobDetailModal(this.app, job, profile, this.adapter, this.state.bodies, this.settings.historyLimit).open(),
+      openChat: (alias, profile) => void this.activateView(CHAT_VIEW, "right").then(() => {
+        const view = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0]?.view;
+        if (view instanceof ChatView) view.focusProfile(alias, profile);
+      }),
+      activity: new ActivityClient(this.adapter),
     };
     this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
     this.registerView(PROFILES_VIEW, leaf => new ProfilesView(leaf, host));

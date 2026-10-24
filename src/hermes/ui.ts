@@ -1,6 +1,7 @@
 import { ItemView, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type { CronJobRecord, ProfileRef } from "../types/hermes-cron";
 import type { EdgeMode } from "../types/snapshot";
+import type { ActivityClient } from "./activity";
 import type { HermesClient } from "./data";
 import { hue } from "./geometry";
 import type { InspectClient } from "./inspect";
@@ -24,6 +25,8 @@ export interface HermesHost {
   saveBoard(alias: string, slug: string): void;
   readonly inspect: InspectClient;
   openJob(job: CronJobRecord, profile: ProfileRef): void;
+  openChat(alias: string, profile: string): void;
+  readonly activity: ActivityClient;
 }
 
 /* ───────────── small DOM helpers ───────────── */

@@ -13,7 +13,7 @@ export interface CronJob {
 export interface Gateway { readonly state: string | null; readonly alive: boolean; readonly platforms: Readonly<Record<string, string>>; readonly served: readonly string[] }
 export interface Usage {
   readonly sessions7d: number; readonly tokens7d: number; readonly cost7d: number; readonly messages7d: number;
-  readonly last: number | null; readonly daily: readonly number[]; readonly sources: Readonly<Record<string, number>>;
+  readonly last: number | null; readonly busy: number; readonly daily: readonly number[]; readonly sources: Readonly<Record<string, number>>;
   readonly recent: readonly (readonly [string, string, number])[];
 }
 export interface Load { running: number; ready: number; blocked: number; todo: number; review: number; done7d: number }
@@ -64,6 +64,8 @@ select json_object('sessions7d',count(*),
   'cost7d',round(coalesce(sum(coalesce(actual_cost_usd,estimated_cost_usd,0)),0),2),
   'messages7d',coalesce(sum(message_count),0),
   'last',(select max(coalesce(last_activity_at,started_at)) from sessions),
+  -- ponytail: a host without session_turn_leases (older schema) fails this whole query and shows no usage, as in activity.ts.
+  'busy',(select count(*) from sessions where id in (select conversation_id from session_turn_leases where expires_at > strftime('%s','now') union select id from sessions where coalesce(last_activity_at,started_at) > strftime('%s','now')-300) and ended_at is null),
   'daily',(select json_group_array(c) from (with recursive d(i) as (select 13 union all select i-1 from d where i>0)
      select (select count(*) from sessions where started_at >= strftime('%s','now','start of day',(-i)||' days')
        and started_at < strftime('%s','now','start of day',(1-i)||' days')) c from d)),
@@ -71,6 +73,7 @@ select json_object('sessions7d',count(*),
      where started_at > strftime('%s','now')-7*86400 group by 1)),
   'recent',(select json_group_array(json_array(title,coalesce(source,''),coalesce(last_activity_at,started_at))) from
      (select title,source,last_activity_at,started_at from sessions where title is not null and title<>''
+      and case when json_valid(model_config) then json_extract(model_config,'$._delegate_from') end is null
       order by coalesce(last_activity_at,started_at) desc limit 5)))
 from sessions where started_at > strftime('%s','now')-7*86400;
 SQL
@@ -167,6 +170,7 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
     // A profile without its own live gateway is still reachable when a live gateway serves it.
     const own = gateways.get(id);
     const host = own?.alive ? own : [...gateways.values()].find(g => g.alive && g.served.includes(id)) ?? own ?? null;
+    const usage = json<Usage | null>(sections.get(`usage ${id}`), null);
     return {
       id,
       description: yamlField(sections.get(`profile ${id}`) ?? "", "description"),
@@ -179,7 +183,7 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
         skills: job.skills ?? [], prompt: job.prompt ?? "",
       })),
       gateway: host,
-      usage: json<Usage | null>(sections.get(`usage ${id}`), null),
+      usage: usage && { ...usage, busy: Number(usage.busy) || 0 },
       load: load.get(id) ?? loadOf(id),
     };
   });
