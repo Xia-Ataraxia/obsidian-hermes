@@ -1789,6 +1789,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 /* modals and notices render outside .hm-view: Obsidian variables only */
 .hm-modal { width: min(520px, 92vw); }
 .hm-modal:has(.is-grid) { width: min(640px, 92vw); }
+.hm-modal .setting-item-heading { padding-inline: 0; }
 .hm-form { display: flex; flex-direction: column; gap: 10px; }
 .hm-form.is-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
 .hm-form.is-grid > :not(.hm-k-field), .hm-form.is-grid > .hm-k-field.is-wide { grid-column: 1 / -1; }
@@ -1800,6 +1801,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-field-desc, .hm-k-hint { color: var(--text-faint); font-size: 11.5px; line-height: 1.4; }
 .hm-k-error { color: var(--color-red); font-size: 12px; white-space: pre-wrap; }
 .hm-k-hint:empty, .hm-k-error:empty { display: none; }
+.hm-k-desc .setting-item-info { flex: none; width: 140px; }
 .hm-k-desc .setting-item-control { flex: 2 1 0; }
 .hm-k-desc textarea { flex: 1; min-height: 4.5em; resize: vertical; }
 .hm-k-desc .hm-chip { margin-left: 6px; }

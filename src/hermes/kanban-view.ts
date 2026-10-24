@@ -100,6 +100,8 @@ export class KanbanView extends HermesView {
   private attentionOpen = false;
   private shown: Partial<Record<Status, number>> = {};
   private force = false;
+  /** Poll ticks still to skip after a failed read, so a failing host is tried once a minute. */
+  private backoff = 0;
   private landing: { ids: string[]; to: Status } | null = null;
   private switcher!: HTMLButtonElement;
   private pill!: HTMLButtonElement;
@@ -111,7 +113,8 @@ export class KanbanView extends HermesView {
   private clearButton!: HTMLButtonElement;
 
   constructor(leaf: WorkspaceLeaf, host: HermesHost) {
-    super(leaf, host, 15_000);
+    // 20 s, not 10: the ssh argv has no ControlMaster, so every probe opens its own connection.
+    super(leaf, host, 20_000);
   }
 
   getViewType(): string { return KANBAN_VIEW; }
@@ -166,6 +169,8 @@ export class KanbanView extends HermesView {
 
   protected override async reload(quiet = false): Promise<void> {
     if (!quiet) this.force = true;
+    // After a failed read a poll tick skips two turns: 60 s between tries instead of 20 s.
+    else if (!this.force && this.backoff > 0) { this.backoff--; return; }
     return super.reload(quiet);
   }
 
@@ -199,8 +204,9 @@ export class KanbanView extends HermesView {
     this.force = false;
     this.landing = null;
     this.dirty = null;
-    const slug = this.host.board(alias);
-    const r = await this.host.kanban.board(alias, slug, !!this.prefs[slug]?.archived, force);
+    const slug = this.host.board(alias), archived = !!this.prefs[slug]?.archived;
+    // Only a poll tick is unforced: it probes the board's token and reads the board only when the token moved.
+    const r = force ? await this.host.kanban.board(alias, slug, archived, true) : await this.host.kanban.poll(alias, slug, archived);
     // Closed while the read was in flight: no diagnostics read, drawer refresh or paint (the base class stops the rest).
     if (this.closed) return null;
     if (alias !== this.alias || slug !== this.host.board(alias)) {
@@ -210,7 +216,11 @@ export class KanbanView extends HermesView {
       this.dirty ??= dirty;
       return null;
     }
+    // A failed read makes the next two poll ticks skip (see reload); any read that answers ends that.
+    this.backoff = typeof r === "string" ? 2 : 0;
     if (typeof r === "string") return r;
+    // The probe saw no change: nothing new to show.
+    if (!r) return null;
     const changed = r.tasks !== this.read?.tasks;
     this.adopt(alias, r);
     if (r.board !== slug) this.host.saveBoard(alias, r.board);

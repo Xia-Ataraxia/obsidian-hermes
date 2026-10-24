@@ -183,3 +183,14 @@ test("upload: bytes ride stdin into a trapped temp file, the name travels base64
   expect(ssh.buildArgv("h", { ...command, stdin: bytes })).not.toContain("-n");
   expect(ssh.buildArgv("h", command)).toContain("-n");
 });
+
+test("poll reads the board only when the probed token moved (never run live)", async () => {
+  const read = (token: string) => ({ stdout: `\u001eboard\nzz-probe\n\u001etoken\n${token}\n\u001etasks\n[]\n` });
+  const probe = (token: string) => ({ stdout: `\u001etoken\n${token}\n` });
+  const replies = [read("1.1"), probe("1.1"), probe("2.1"), read("2.1")];
+  const ssh = fakeSsh(n => replies[n - 1] ?? {}), client = new KanbanClient(ssh.adapter);
+  await client.board("h", "zz-probe", false);
+  expect(await client.poll("h", "zz-probe", false)).toBeNull();
+  expect(await client.poll("h", "zz-probe", false)).toMatchObject({ token: "2.1" });
+  expect(ssh.scripts.map(s => s.includes("S board"))).toEqual([true, false, false, true]);
+});

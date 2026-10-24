@@ -343,7 +343,7 @@ test("a closed view starts no ssh read and paints nothing", async () => {
 // The Kanban view, real (render and reload are stubbed: there is no DOM), over a client that only records what it is asked to send.
 /** The private corner of a KanbanView these tests reach into. */
 interface Kanban {
-  alias: string; key: string; read: BoardRead | null; drawer: unknown; dirty: string | null;
+  alias: string; key: string; read: BoardRead | null; drawer: unknown; dirty: string | null; force: boolean;
   render(): void; reload(): Promise<void>; onClose(): Promise<void>;
   pull(alias: string): Promise<string | null>;
   drop(ids: string[], to: string): Promise<void>;
@@ -415,7 +415,9 @@ async function pulled(closeAt?: "board" | "diagnostics"): Promise<{ calls: strin
   let renders = 0;
   view.render = () => { renders++; };
   view.drawer = { id: "t1", refresh: () => { calls.push("drawer"); return Promise.resolve(); }, close: () => undefined };
+  // A write marks its task dirty and forces the read (an unforced pull is a poll tick).
   view.dirty = "t1";
+  view.force = true;
   const pulling = view.pull("A");
   if (closeAt === "board") await view.onClose();
   board.open();

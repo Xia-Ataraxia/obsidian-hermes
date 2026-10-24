@@ -105,6 +105,13 @@ S profiles; for d in "$H"/profiles/*/; do s=$(basename "$d"); [ "$s" != default 
 S config; awk '/^kanban:/{f=1;next} f&&/^[^ #]/{exit} f' "$H/config.yaml" 2>/dev/null | grep -E '^ +(lane_by_profile|auto_decompose|orchestrator_profile|default_assignee):' || true`;
 
 // ponytail: token = last event id + task count, so heartbeat and claim changes wait for the next event (D29)
+const TOKEN = "select coalesce((select max(id) from task_events),0)||'.'||(select count(*) from tasks);";
+/** A poll tick's probe: the board's token alone. A board without a db prints none, so the full read runs (and falls back). */
+const probeScript = (slug: string): string => String.raw`db=${dbPath(slug)}; [ -f "$db" ] || exit 0
+S token; ro "$db" <<'SQL'
+${TOKEN}
+SQL`;
+
 function boardScript(slug: string, last: string | null, archived: boolean): string {
   return String.raw`${LIST}
 db=${dbPath(slug)}; b=${safeToken(slug)}; last=${b64Arg(last ?? "")}
@@ -112,7 +119,7 @@ db=${dbPath(slug)}; b=${safeToken(slug)}; last=${b64Arg(last ?? "")}
 S board; echo "$b"
 if [ -f "$db" ]; then
 tok=$(ro "$db" <<'SQL'
-select coalesce((select max(id) from task_events),0)||'.'||(select count(*) from tasks);
+${TOKEN}
 SQL
 ) || exit 1
 S token; echo "$tok"
@@ -444,6 +451,19 @@ export class KanbanClient {
     const read = parseBoard(result.sections, cached?.tasks);
     this.reads.set(this.cacheKey(alias, read.board, archived), read);
     return read;
+  }
+
+  /** A poll tick: one sqlite3 read of the board's token, and the full read only when it moved since the cached read; null when it did not.
+   *  ponytail: only this board's db is watched, so other boards' counts, the profiles and the kanban config wait for a
+   *  change here or a forced read (focus, Refresh, a write); add them to the probe if that lag matters. */
+  async poll(alias: string, slug: string, archived: boolean): Promise<BoardRead | string | null> {
+    const last = this.reads.get(this.cacheKey(alias, slug, archived))?.token;
+    if (last) {
+      const result = await runScript(this.adapter, alias, probeScript(slug));
+      if (!result.ok) return result.message;
+      if (result.sections.get("token") === last) return null;
+    }
+    return this.board(alias, slug, archived);
   }
 
   async detail(alias: string, slug: string, id: string): Promise<Detail | string> {
