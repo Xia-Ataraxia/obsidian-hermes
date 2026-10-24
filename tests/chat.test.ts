@@ -1,7 +1,8 @@
-import { expect, mock, spyOn, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { HermesChat, reduce, sessionFrom, type Turn } from "../src/hermes/chat";
 import { safeToken } from "../src/hermes/remote";
 import { ControlCenterProcesses } from "../src/ui/control-center-processes";
+import { rendered } from "./obsidian-mock";
 
 // bun has no `window`, and the processes module times out through window.setTimeout; `self` is bun's global object.
 (self as { window?: unknown }).window ??= self;
@@ -111,12 +112,6 @@ test("stream ends with a null exit on the byte cap or stop, and refuses a cancel
   expect(await processes.stream("sh", ["-c", "true", "--", "g"], options).done).toEqual(closed);
 });
 
-const rendered: string[] = [];
-// bun shares one module registry across test files, so every "obsidian" mock declares the same names (see inspect.test.ts).
-await mock.module("obsidian", () => ({
-  parseYaml: () => ({}),
-  MarkdownRenderer: { render: (_app: unknown, _md: string, _el: unknown, sourcePath: string) => void rendered.push(sourcePath) },
-}));
 const { tame, renderSafe, web } = await import("../src/hermes/markdown");
 
 test("tame keeps code and highlighting, and drops plugin blocks, embeds and raw HTML", () => {

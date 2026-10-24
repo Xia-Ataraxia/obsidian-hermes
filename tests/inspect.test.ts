@@ -1,10 +1,7 @@
-/* global Bun -- the bun test runtime */
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import type { PluginInfo, SkillInfo } from "../src/hermes/inspect";
 
-// bun shares one module registry across test files, so every "obsidian" mock declares the same names (see chat.test.ts).
-void mock.module("obsidian", () => ({ parseYaml: Bun.YAML.parse, MarkdownRenderer: { render: async () => {} } }));
 const { byLeastRecent, EDIT_CAP, InspectClient, nextDisabled, parseDetail, pluginLastUsed } = await import("../src/hermes/inspect");
 
 const H = "/home/u/.hermes", P = `${H}/profiles/xia`, LOCAL = `${P}/skills`, OMH = "/home/u/.omh/profiles/xia/skills", SHARED = `${H}/skills-shared`;

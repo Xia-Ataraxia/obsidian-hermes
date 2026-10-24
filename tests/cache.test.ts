@@ -1,9 +1,10 @@
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { CACHE_VERSION, diskCache, keepBoard, keepChat, keepDetail, keepProfiles, piece, type CacheFs, type DiskCache } from "../src/hermes/cache";
 import type { ProfilesSnapshot } from "../src/hermes/data";
 import type { Detail } from "../src/hermes/inspect";
 import type { BoardRead } from "../src/hermes/kanban";
 import type { Ask, TaskHost } from "../src/hermes/kanban-drawer";
+import { modals, notices } from "./obsidian-mock";
 
 const ROOT = "plug/cache";
 const MARK = "PLANTED";
@@ -230,32 +231,7 @@ test("an inspector copy keeps skill and plugin rows, and no path, text, setting,
   expect(copy.plugins[0]?.key.startsWith("cached:")).toBe(true);
 });
 
-// The views around the cache. ui.ts and the Kanban view import the Obsidian runtime, which bun does not have.
-// bun shares one module registry across test files, so every "obsidian" mock declares the same names (see chat.test.ts, inspect.test.ts):
-// this file comes first, so its mock has to name everything a view of any file needs.
-const modals: unknown[] = [];
-const notices: string[] = [];
-await mock.module("obsidian", () => ({
-  ItemView: class {
-    app = { workspace: { requestSaveLayout: () => undefined } };
-    getState() { return {}; }
-    setState() { return Promise.resolve(); }
-    onClose() { return Promise.resolve(); }
-    registerInterval() { return 0; }
-  },
-  Modal: class { constructor(public app: unknown) { /* stub */ } open() { modals.push(this); } close() { /* stub */ } setTitle() { /* stub */ } },
-  Component: class {},
-  AbstractInputSuggest: class {},
-  FuzzySuggestModal: class {},
-  Menu: class {},
-  Setting: class {},
-  SuggestModal: class {},
-  Notice: class { constructor(text: string) { notices.push(text); } },
-  setIcon: () => undefined,
-  setTooltip: () => undefined,
-  parseYaml: () => ({}),
-  MarkdownRenderer: { render: () => undefined },
-}));
+// The views around the cache. ui.ts and the Kanban view import the Obsidian runtime, which bun does not have (see obsidian-mock.ts).
 const { HermesView } = await import("../src/hermes/ui");
 const { KanbanView } = await import("../src/hermes/kanban-view");
 const { openCreate } = await import("../src/hermes/kanban-drawer");
