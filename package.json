@@ -1,6 +1,6 @@
 {
   "name": "hermes-control-center",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Obsidian plugin to monitor and manage remote Hermes Agent profiles over SSH.",
   "license": "MIT",
