@@ -84,7 +84,7 @@ test("model catalog parses and setModel writes provider then model via the CLI",
   const script = sent.pop()!;
   expect(script.indexOf("config set model.provider")).toBeLessThan(script.indexOf("config set model.default"));
   expect(script).not.toContain("rm -rf");
-  await expect(client.setModel("h", "../x", "m", "p")).rejects.toThrow();
+  expect(await client.setModel("h", "../x", "m", "p").then(() => null, (e: unknown) => e)).toBeInstanceOf(Error);
   const count = sent.length;
   expect((await client.setModel("h", "xia", "--help", "p")).ok).toBe(false);
   expect((await client.setModel("h", "xia", "m", "-p")).ok).toBe(false);

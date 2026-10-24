@@ -145,7 +145,7 @@ export class ProfilesView extends HermesView {
     if (profile) { this.inspector?.update(profile, snapshot.now); this.cards.get(profile.id)?.addClass("is-selected"); } else this.inspector?.close();
   }
 
-  /** The edge mode changed: new lines and legend only, so an open edit in the drawer survives. */
+  /** The edge mode changed: new lines and legend only; the cards and the profile popup stay as they are. */
   redrawEdges(): void {
     if (!this.legend) return;
     this.drawEdges();

@@ -20,16 +20,16 @@ export class ControlCenterProcesses {
       let capped = false;
       let stopped = false;
       let failure: Error | null = null;
-      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      let killTimer: number | undefined;
       const stop = (): void => {
         if (stopped) return;
         stopped = true;
         child.kill("SIGTERM");
-        killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+        killTimer = window.setTimeout(() => child.kill("SIGKILL"), 1000);
       };
       const owned = { alias, stop, done };
       this.children.add(owned);
-      const timer = setTimeout(stop, options.timeoutMs);
+      const timer = window.setTimeout(stop, options.timeoutMs);
       child.stdout?.on("data", (chunk: Buffer) => {
         if (capped) return;
         bytes += chunk.length;
@@ -41,8 +41,8 @@ export class ControlCenterProcesses {
       child.stdin?.on("error", error => { failure = error; stop(); });
       if (stdin !== undefined) child.stdin?.end(stdin);
       child.once("close", exitCode => {
-        clearTimeout(timer);
-        if (killTimer) clearTimeout(killTimer);
+        window.clearTimeout(timer);
+        if (killTimer) window.clearTimeout(killTimer);
         this.children.delete(owned);
         completed();
         if (failure) { reject(failure); return; }
@@ -67,12 +67,12 @@ export class ControlCenterProcesses {
     let reason = "";
     let stopped = false;
     let closed = false;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: number | undefined;
     const stop = (): void => {
       if (stopped || closed) return;
       stopped = true;
       child.kill("SIGTERM");
-      killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+      killTimer = window.setTimeout(() => child.kill("SIGKILL"), 1000);
     };
     // utf8 decoding keeps a character split across chunks whole; the partial last line waits for the next chunk.
     // A callback that throws is logged, so the rest of the chunk still arrives.
@@ -88,7 +88,7 @@ export class ControlCenterProcesses {
     const err = lines(line => { tail = (tail + line + "\n").slice(-4096); options.onStderr(line); });
     const owned = { alias, stop, done: done.then(() => undefined) };
     this.children.add(owned);
-    const timer = setTimeout(() => { reason = "Timed out\n"; stop(); }, options.timeoutMs);
+    const timer = window.setTimeout(() => { reason = "Timed out\n"; stop(); }, options.timeoutMs);
     child.stdout?.setEncoding("utf8").on("data", (text: string) => {
       if (stopped) return;
       bytes += Buffer.byteLength(text);
@@ -100,8 +100,8 @@ export class ControlCenterProcesses {
     child.once("error", error => { tail += `${error.message}\n`; });
     child.once("close", exitCode => {
       closed = true;
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      window.clearTimeout(timer);
+      if (killTimer) window.clearTimeout(killTimer);
       out.flush();
       err.flush();
       this.children.delete(owned);

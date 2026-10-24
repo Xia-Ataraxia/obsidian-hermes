@@ -198,8 +198,6 @@ export function parseProfiles(sections: Sections): ProfilesSnapshot {
   };
 }
 
-export type ProfileDoc = "SOUL.md" | "memories/USER.md" | "memories/MEMORY.md";
-
 export function profileDir(id: string): string {
   return id === "default" ? `"$H"` : `"$H/profiles/${safeToken(id)}"`;
 }
@@ -215,20 +213,6 @@ export class HermesClient {
   async profiles(alias: string): Promise<ProfilesSnapshot | string> {
     const result = await runScript(this.adapter, alias, PROFILES_SCRIPT);
     return result.ok ? parseProfiles(result.sections) : result.message;
-  }
-
-  async document(alias: string, profile: string, doc: ProfileDoc): Promise<string | null> {
-    const result = await runScript(this.adapter, alias, `S doc; cat ${profileDir(profile)}/${doc} 2>/dev/null || exit 0`);
-    return result.ok ? result.sections.get("doc") ?? "" : null;
-  }
-
-  /** Atomic replace; refused when the file changed since `expected` was read. */
-  async saveDocument(alias: string, profile: string, doc: ProfileDoc, expected: string, next: string): Promise<Outcome> {
-    const file = `${profileDir(profile)}/${doc}`;
-    const script = `f=${file}; cur=$(cat "$f" 2>/dev/null; printf x); want=${b64Arg(expected)}x
-[ "$cur" = "$want" ] || { echo "Changed on the server. Reload first." >&2; exit 3; }
-mkdir -p "$(dirname "$f")" && printf %s ${b64Arg(next)} > "$f.obsidian.$$" && mv "$f.obsidian.$$" "$f" && S ok`;
-    return this.outcome(await runScript(this.adapter, alias, script));
   }
 
   /** [model, provider] pairs from the model-picker cache Hermes keeps per profile (else the default profile's). */

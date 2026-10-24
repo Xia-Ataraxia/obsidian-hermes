@@ -90,7 +90,7 @@ export class ChatView extends HermesView {
     this.input = composer.createEl("textarea", { attr: { rows: "1", "aria-label": "Message" } });
     this.input.addEventListener("input", () => { this.state(this.key()).draft = this.input.value; });
     this.input.addEventListener("keydown", event => {
-      if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
       event.preventDefault();
       this.send();
     });
@@ -178,9 +178,9 @@ export class ChatView extends HermesView {
   private send(): void {
     const text = this.input.value.trim(), alias = this.alias, profile = this.profile, key = this.key(), s = this.state(key);
     if (!text || !alias || this.streams.has(key)) return;
-    if (text.startsWith("/")) { new Notice("Slash commands only work in the Hermes TUI"); return; }
+    if (text.startsWith("/")) { new Notice("Slash commands only work in the terminal"); return; }
     // Twice base64-encoded it must stay under Linux's 128 KB limit for one ssh argument.
-    if (Buffer.byteLength(text) > 32 * 1024) { new Notice("Message is too long (32 KB max)"); return; }
+    if (Buffer.byteLength(text) > 32 * 1024) { new Notice("Message is too long (over 32,768 bytes)"); return; }
     // Rows loaded for this thread bound the turn from below; otherwise wait for the server's `after` line.
     const after = this.loaded.get(key) === s.sid ? Math.max(0, ...s.rows.map(row => row.id)) : null;
     const turn: Turn = { user: text, after, sid: s.sid, code: null, text: "", tools: [], usage: null, error: null, done: false };

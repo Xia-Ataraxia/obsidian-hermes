@@ -3,6 +3,9 @@ import { HermesChat, reduce, sessionFrom, type Turn } from "../src/hermes/chat";
 import { safeToken } from "../src/hermes/remote";
 import { ControlCenterProcesses } from "../src/ui/control-center-processes";
 
+// bun has no `window`, and the processes module times out through window.setTimeout; `self` is bun's global object.
+(self as { window?: unknown }).window ??= self;
+
 const SID = "20261001_000926_56c382";
 
 test("reduce folds stream-json: our after line, deltas, tools paired by id then by name, the result after a replay gap", () => {

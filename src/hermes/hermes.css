@@ -411,8 +411,6 @@
 .hm-sources-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 0 16px; color: var(--text-muted); font-size: 11px; }
 .hm-sources-legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .hm-swatch { width: 8px; height: 8px; border-radius: 2px; }
-.hm-recent-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--hm-line); font-size: 12.5px; }
-.hm-recent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ═════════════ Profile modal ═════════════ */
 

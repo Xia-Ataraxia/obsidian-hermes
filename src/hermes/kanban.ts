@@ -409,7 +409,8 @@ export class KanbanClient {
     return result.ok ? parseDetail(result.sections) ?? `No task ${id} on this board` : result.message;
   }
 
-  /** Only where the board's db exists: the CLI's `init_db` would create a missing one. */
+  /** live() stops a board without a db with a plain message; for a named board the CLI refuses too
+   *  ("does not exist; create it with ..." or "is archived; refusing to recreate its database"). */
   async diagnostics(alias: string, slug: string): Promise<Record<string, Diagnostic[]> | string> {
     const result = await runScript(this.adapter, alias, `${live(slug)}S diag; hermes kanban --board ${safeToken(slug)} diagnostics --json </dev/null`, 1024 * 1024);
     return result.ok ? parseDiagnostics(result.sections.get("diag")) : result.message;

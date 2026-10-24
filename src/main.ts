@@ -167,12 +167,16 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.addSettingTab(new HermesCronSettingsTab(this.app, this));
   }
 
-  override async onunload(): Promise<void> {
+  override onunload(): void {
     this.unloaded = true;
     this.targets.dispose();
     this.scheduler.stop();
     this.state.bodies.clear();
     this.state.dispose();
+    void this.stopProcesses();
+  }
+
+  private async stopProcesses(): Promise<void> {
     await this.processes.dispose();
     this.logger.info("unloaded");
   }

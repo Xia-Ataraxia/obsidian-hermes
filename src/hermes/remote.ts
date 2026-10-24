@@ -47,6 +47,7 @@ export function parseSections(stdout: string): Sections {
 }
 
 // Tailscale SSH reports exit 0 for every command, so the script prints its own status last.
+// eslint-disable-next-line no-control-regex -- 0x1e (record separator) marks the status line
 export const STATUS = /\u001e\?(\d+)\n?$/;
 
 /** The `sh -c` wrapper every remote script travels in, base64-encoded so the login shell never parses it: PRELUDE,
