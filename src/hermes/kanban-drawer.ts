@@ -1,6 +1,6 @@
-import { AbstractInputSuggest, Component, Modal, Notice, setTooltip, type App } from "obsidian";
+import { AbstractInputSuggest, Component, FuzzySuggestModal, Modal, Notice, Setting, setTooltip, type App, type TFile } from "obsidian";
 import type { HermesClient } from "./data";
-import type { Card, Detail, Diagnostic, KanbanClient, NewTask, Status, TaskRow, Verb } from "./kanban";
+import { MAX_ATTACHMENT, type Attachment, type Card, type Detail, type Diagnostic, type KanbanClient, type NewTask, type NotifyTarget, type Status, type TaskRow, type Verb } from "./kanban";
 import { renderSafe } from "./markdown";
 import { absolute, avatar, compact, icon, iconButton, relative } from "./ui";
 
@@ -50,6 +50,9 @@ export function when(parent: HTMLElement, at: number | undefined, cls = "hm-mute
 }
 
 const elapsed = (s: number): string => s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`;
+
+/** Chat and thread ids show only their last 4 characters. */
+const mask = (id: string): string => id.length > 4 ? `…${id.slice(-4)}` : id;
 
 /** Text button with an optional leading icon. */
 export function action(parent: HTMLElement, label: string, onClick: () => void, iconName = "", tip = ""): HTMLButtonElement {
@@ -251,7 +254,7 @@ export interface TaskHost {
   diagnostics(id: string): Diagnostic[];
   /** Run a verb, then refresh; resolves to the CLI error or null. */
   write(v: Verb): Promise<string | null>;
-  /** Why this host takes no more writes (the SSH host changed since it was built: its alias and board are stale), else null. */
+  /** Why this host takes no more writes (the view closed, or the SSH host changed since it was built: its alias and board are stale), else null. */
   moved(): string | null;
   open(id: string, focus?: Focus): void;
   close(): void;
@@ -375,8 +378,8 @@ export function diagCard(parent: HTMLElement, host: TaskHost, task: { id: string
 
 /* ───────────── drawer ───────────── */
 
-/** Section names folded by the user, kept for the session. */
-const folded = new Set(["Events", "Worker log"]);
+/** Section names folded by the user, kept for the session. Home channels cost an SSH read, so they load on first unfold. */
+const folded = new Set(["Events", "Worker log", "Notify home channels"]);
 
 export class TaskDrawer {
   readonly el: HTMLElement;
@@ -389,6 +392,8 @@ export class TaskDrawer {
   /** A specify or decompose LLM call is in flight. */
   private busy = false;
   private focus: Focus | undefined;
+  /** Home channels and subscriptions, read once per drawer and again after each toggle. */
+  private homes: Promise<{ homes: NotifyTarget[]; subs: NotifyTarget[] } | string> | undefined;
 
   constructor(readonly host: TaskHost, parent: HTMLElement, readonly id: string, focus?: Focus) {
     this.focus = focus;
@@ -471,6 +476,86 @@ export class TaskDrawer {
     return { details, head, body: details.createDiv("hm-k-section-body") };
   }
 
+  /** One toggle per home channel and per other subscription; a failed toggle repaints the last read. */
+  private drawHomes(box: HTMLElement): void {
+    if (!box.childElementCount) box.createDiv({ cls: "hm-muted", text: "Loading…" });
+    const read = this.homes ??= this.host.kanban.homes(this.host.alias, this.host.slug, this.id).catch(message);
+    void read.then(r => {
+      if (!box.isConnected || read !== this.homes) return;
+      box.empty();
+      if (typeof r === "string") { box.createDiv({ cls: "hm-error", text: r }); return; }
+      const key = (t: NotifyTarget): string => `${t.platform}\n${t.chat}\n${t.thread}`;
+      const subbed = new Set(r.subs.map(key)), homes = new Set(r.homes.map(key));
+      for (const t of [...r.homes, ...r.subs.filter(s => !homes.has(key(s)))]) {
+        const on = subbed.has(key(t)), target = [t.name, mask(t.chat), t.thread && `thread ${mask(t.thread)}`].filter(Boolean).join(" · ");
+        new Setting(box).setName(t.platform).setDesc(target).addToggle(toggle => toggle.setValue(on)
+          .setTooltip(on ? `Sending updates to ${target}. Click to stop.` : `Send completed, blocked and gave-up notifications to ${target}.`)
+          .onChange(value => {
+            toggle.setDisabled(true);
+            void this.host.write({ verb: value ? "notify-subscribe" : "notify-unsubscribe", id: this.id, platform: t.platform, chat: t.chat, ...(t.thread ? { thread: t.thread } : {}) }).then(error => {
+              if (error === null) this.homes = undefined; else new Notice(error, 10_000);
+              this.drawHomes(box);
+            });
+          }));
+      }
+      if (!r.homes.length) box.createDiv({ cls: "hm-muted", text: "Set a home channel in Hermes" });
+    });
+  }
+
+  /** Attach a file of `size` bytes; the cap is checked before the bytes are read. */
+  private async upload(name: string, size: number, read: () => Promise<ArrayBuffer>, type = ""): Promise<void> {
+    if (size > MAX_ATTACHMENT) { new Notice(`${name} is larger than 25 MiB`, 10_000); return; }
+    const notice = new Notice(`Uploading ${name}…`, 0);
+    try {
+      await this.write({ verb: "attach", id: this.id, name, ...(type ? { type } : {}), bytes: new Uint8Array(await read()) });
+    } catch (e) {
+      new Notice(message(e), 10_000);
+    } finally {
+      notice.hide();
+    }
+  }
+
+  /** Hermes guesses a vault file's content type from its name. */
+  private attachVault(): void {
+    const app = this.host.app, pick = (file: TFile): void => void this.upload(file.name, file.stat.size, () => app.vault.readBinary(file));
+    const modal = new (class extends FuzzySuggestModal<TFile> {
+      getItems(): TFile[] { return app.vault.getFiles(); }
+      getItemText(file: TFile): string { return file.path; }
+      onChooseItem(file: TFile): void { pick(file); }
+    })(app);
+    modal.setPlaceholder("Attach a vault file…");
+    modal.open();
+  }
+
+  private attachFile(): void {
+    // Owned by the drawer's document: a popout's click activation can't open a chooser for the main window.
+    const input = this.el.doc.adoptNode(createEl("input", { type: "file" }));
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) void this.upload(file.name, file.size, () => file.arrayBuffer(), file.type);
+    });
+    input.click();
+  }
+
+  /** Save an attachment to the vault's attachment folder, then open it in a new tab. */
+  private async download(a: Attachment, root: string | undefined): Promise<void> {
+    const moved = this.host.moved();
+    if (moved !== null) { new Notice(moved, 10_000); return; }
+    const app = this.host.app, notice = new Notice(`Downloading ${a.name}…`, 0);
+    try {
+      const r = await this.host.kanban.download(this.host.alias, this.host.slug, this.id, a, root);
+      if (!r.ok) { new Notice(r.message, 10_000); return; }
+      // eslint-disable-next-line no-control-regex -- control characters never belong in a vault file name
+      const name = a.name.replace(/[\\/:*?"<>|#^[\]\u0000-\u001f\u007f]/g, "_").replace(/^[.\s]+|[.\s]+$/g, "") || "attachment";
+      const file = await app.vault.createBinary(await app.fileManager.getAvailablePathForAttachment(name), r.bytes.slice().buffer);
+      await app.workspace.getLeaf("tab").openFile(file);
+    } catch (e) {
+      new Notice(message(e), 10_000);
+    } finally {
+      notice.hide();
+    }
+  }
+
   private render(detail: Detail): void {
     this.detail = detail;
     const t = detail.task, app = this.host.app, top = this.pane.scrollTop;
@@ -488,6 +573,10 @@ export class TaskDrawer {
     }
 
     this.meta(this.section("Details").body.createDiv("hm-k-meta"), t);
+
+    const homes = this.section("Notify home channels");
+    if (homes.details.open) this.drawHomes(homes.body);
+    else homes.details.addEventListener("toggle", () => this.drawHomes(homes.body), { once: true });
 
     const desc = this.section("Description");
     const showBody = (body: string | undefined): void => {
@@ -558,18 +647,20 @@ export class TaskDrawer {
       }
     }
 
-    if (detail.attachments.length) {
-      const box = this.section("Attachments", `Attachments (${detail.attachments.length})`).body;
-      for (const a of detail.attachments) {
-        const line = box.createDiv("hm-k-line");
-        setTooltip(icon(line, "paperclip"), a.type || "Attachment");
-        line.createSpan({ cls: "hm-k-line-text", text: a.name });
-        if (a.size) line.createSpan({ cls: "hm-muted", text: `${compact(a.size)}B` });
-        when(line, a.at);
-        iconButton(line, "trash-2", "Remove attachment", () => void confirmed(app, "Remove attachment", "Remove this attachment?", "Delete", true).then(ok => {
-          if (ok) void this.write({ verb: "attach-rm", id: this.id, attachment: a.id });
-        }));
-      }
+    const files = this.section("Attachments", `Attachments (${detail.attachments.length})`);
+    iconButton(files.head, "file-plus", "Attach a vault file", () => this.attachVault(), "hm-push");
+    iconButton(files.head, "upload", "Attach a file from this computer", () => this.attachFile());
+    if (!detail.attachments.length) files.body.createDiv({ cls: "hm-muted", text: "— no attachments —" });
+    for (const a of detail.attachments) {
+      const line = files.body.createDiv("hm-k-line");
+      setTooltip(icon(line, "paperclip"), a.type || "Attachment");
+      line.createSpan({ cls: "hm-k-line-text", text: a.name });
+      if (a.size) line.createSpan({ cls: "hm-muted", text: `${compact(a.size)}B` });
+      when(line, a.at);
+      iconButton(line, "download", "Save to vault", () => void this.download(a, detail.attachRoot));
+      iconButton(line, "trash-2", "Remove attachment", () => void confirmed(app, "Remove attachment", "Remove this attachment?", "Delete", true).then(ok => {
+        if (ok) void this.write({ verb: "attach-rm", id: this.id, attachment: a.id });
+      }));
     }
 
     const comments = this.section("Comments", `Comments (${detail.comments.length})`).body;

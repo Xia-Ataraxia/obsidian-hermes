@@ -6,8 +6,8 @@ export class ControlCenterProcesses {
   private readonly children = new Set<{ readonly alias: string; stop(): void; readonly done: Promise<void> }>();
   private readonly retired = new Set<string>();
   private disposed = false;
-  readonly runner: RemoteRunner = (file, args, options) => this.run(file, args, options);
-  private run(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number }, stdin?: string): ReturnType<RemoteRunner> {
+  readonly runner: RemoteRunner = (file, args, options) => this.run(file, args, options, options.stdin);
+  private run(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number }, stdin?: Uint8Array): ReturnType<RemoteRunner> {
     const alias = args[args.indexOf("--") + 1] ?? "";
     if (this.disposed || this.retired.has(alias)) return Promise.resolve({ stdout: "", stderr: "Connection closed", exitCode: null, capExceeded: false });
     return new Promise((resolve, reject) => {
@@ -38,7 +38,9 @@ export class ControlCenterProcesses {
       });
       child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(0, 8192); });
       child.once("error", error => { failure = error; });
-      child.stdin?.on("error", error => { failure = error; stop(); });
+      // A host that exits before reading all of stdin breaks the pipe (EPIPE): its own exit status says why, and the upload
+      // script checks the byte count, so a short write never passes as success.
+      child.stdin?.on("error", () => undefined);
       if (stdin !== undefined) child.stdin?.end(stdin);
       child.once("close", exitCode => {
         window.clearTimeout(timer);
@@ -48,7 +50,7 @@ export class ControlCenterProcesses {
         if (failure) { reject(failure); return; }
         const bounded = applyPrefixBound(Buffer.concat(chunks), options.maxBytes);
         resolve({ stdout: decodeUtf8Prefix(bounded.bytes), stderr: stopped && !capped ? "Connection closed or command timed out" : stderr,
-          exitCode: stopped ? null : exitCode, capExceeded: capped || bounded.capExceeded });
+          exitCode: stopped ? null : exitCode, capExceeded: capped || bounded.capExceeded, bytes: bounded.bytes });
       });
     });
   }

@@ -312,14 +312,15 @@ export class KanbanView extends HermesView {
 
   private taskHost(): TaskHost {
     const { alias } = this;
+    const moved = (): string | null => this.closed ? "The board view is closed." : this.alias === alias ? null : MOVED;
     return {
       app: this.app, owner: this, alias, slug: this.read?.board ?? this.host.board(alias),
       kanban: this.host.kanban, client: this.host.client,
       cards: () => this.read?.tasks ?? [],
       profiles: () => this.read?.profiles ?? [],
       diagnostics: id => this.diags[id] ?? [],
-      write: v => this.alias === alias ? this.write(v) : Promise.resolve(MOVED),
-      moved: () => this.alias === alias ? null : MOVED,
+      write: v => { const why = moved(); return why === null ? this.write(v) : Promise.resolve(why); },
+      moved,
       open: (id, focus) => this.openTask(id, focus),
       close: () => { this.closeDrawer(); this.render(); },
     };

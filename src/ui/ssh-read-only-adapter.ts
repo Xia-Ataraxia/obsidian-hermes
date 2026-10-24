@@ -80,7 +80,8 @@ export class SshReadOnlyAdapter {
     if (!aliasCheck.ok) {
       throw new Error(`refusing to run against alias ${alias}: ${aliasCheck.detail}`);
     }
-    return [...FIXED_OPTIONS, "--", alias, command.remoteCommand];
+    // `-n` (stdin from /dev/null) stays on every command except one that sends bytes.
+    return [...(command.stdin ? FIXED_OPTIONS.filter(option => option !== "-n") : FIXED_OPTIONS), "--", alias, command.remoteCommand];
   }
 
   async run(alias: string, command: BoundRemoteCommand): Promise<RemoteExecOutcome> {
@@ -90,6 +91,7 @@ export class SshReadOnlyAdapter {
         timeoutMs: this.timeoutMs,
         // Request one byte past the bound so an overflow is detectable.
         maxBytes: command.byteCap + 1,
+        ...(command.stdin ? { stdin: command.stdin } : {}),
       });
       return {
         stdout: result.stdout,
@@ -97,6 +99,7 @@ export class SshReadOnlyAdapter {
         exitCode: result.exitCode,
         capExceeded: result.capExceeded,
         transport: classifyTransport(result.exitCode, result.stderr),
+        ...(result.bytes ? { bytes: result.bytes } : {}),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

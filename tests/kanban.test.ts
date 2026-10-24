@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { dropVerb, KanbanClient, parseBoard, parseBulk, parseCreate, parseDiagnostics, staleness, stuck, verb, type Card, type Feed, type FeedRow, type Status } from "../src/hermes/kanban";
+import { attachmentPath, dropVerb, KanbanClient, parseBoard, parseBulk, parseCreate, parseDiagnostics, staleness, stuck, verb, type Card, type Feed, type FeedRow, type Status } from "../src/hermes/kanban";
 import { b64Arg, parseSections } from "../src/hermes/remote";
-import type { SshReadOnlyAdapter } from "../src/ui/ssh-read-only-adapter";
+import { SshReadOnlyAdapter } from "../src/ui/ssh-read-only-adapter";
 
 const sec = (...parts: [string, string][]) => parseSections(parts.map(([name, body]) => `\u001e${name}\n${body}\n`).join(""));
 
@@ -149,4 +149,37 @@ test("bulk stops at a failed chunk and skips the rest", async () => {
     { ok: false, message: "No confirmation from host" }, { ok: false, unknown: true, message: "timeout" }, { ok: false, unknown: true, message: "timeout" },
     { ok: false, message: "Skipped: an earlier batch failed" }, { ok: false, message: "Skipped: an earlier batch failed" },
   ]);
+});
+
+test("attachmentPath accepts only <root>/<task id>/<file>", () => {
+  const root = "/h/.hermes/kanban/attachments", ok = `${root}/t_1/f.txt`;
+  expect(attachmentPath(ok, root, "t_1")).toBe(ok);
+  for (const stored of ["h/.hermes/kanban/attachments/t_1/f.txt", `${root}/t_1/../t_2/f.txt`, `${root}/t_1/./f.txt`, `${root}/t_1//f.txt`, `${root}/t_1/..`,
+    "/h/.hermes/kanban/attachments-evil/t_1/f.txt", "/etc/passwd", `${root}/t_1/f\n.txt`, `${root}/t_1/f\u0000.txt`, root, `${root}/t_1`, `${root}/t_1/`,
+    `${root}/t_2/f.txt`, `${root}/t_1/d/f.txt`, `${root}/t_1/f.txt/`, undefined])
+    expect(attachmentPath(stored, root, "t_1")).toBeNull();
+  for (const r of [undefined, `${root}/`, "/h/.hermes/kanban/../kanban/attachments", "/"]) expect(attachmentPath(ok, r, "t_1")).toBeNull();
+});
+
+test("upload: bytes ride stdin into a trapped temp file, the name travels base64, over 25 MiB never reaches ssh (never run live)", async () => {
+  const sent: { script: string; stdin?: Uint8Array | undefined }[] = [];
+  const slow = { run: async (_alias: string, command: { remoteCommand: string; stdin?: Uint8Array }) => {
+    sent.push({ script: Buffer.from(command.remoteCommand.match(/printf %s (\S+)/)![1]!, "base64").toString(), stdin: command.stdin });
+    return { transport: "connected", stdout: "\u001eok\n", stderr: "", exitCode: 0, capExceeded: false };
+  } } as unknown as SshReadOnlyAdapter;
+  const fast = fakeSsh(), client = new KanbanClient(fast.adapter, slow), bytes = new Uint8Array([0, 1, 2, 255]);
+  expect(await client.run("h", "zz-probe", { verb: "attach", id: "t_1", name: "a b.txt", bytes })).toEqual({ ok: true });
+  expect(fast.scripts).toHaveLength(0);
+  expect(sent[0]!.stdin).toBe(bytes);
+  for (const line of [`t=$(mktemp "\${TMPDIR:-/tmp}/hermes-attach.XXXXXX") || exit 1`, `trap 'rm -f "$t"' EXIT`, `cat > "$t" || exit 1`, `[ $(wc -c < "$t") -eq 4 ] || {`,
+    `hermes kanban --board zz-probe attach --author=obsidian --name=${b64Arg("a b.txt")} -- t_1 "$t" </dev/null`])
+    expect(sent[0]!.script).toContain(line);
+  expect(sent[0]!.script).not.toContain("a b.txt");
+  expect(String(await client.run("h", "zz-probe", { verb: "attach", id: "t;1", name: "x", bytes }).catch((e: unknown) => e))).toContain("Unsafe remote token");
+  expect(await client.run("h", "zz-probe", { verb: "attach", id: "t_1", name: "x", bytes: new Uint8Array(25 * 1024 * 1024 + 1) })).toEqual({ ok: false, message: "Larger than 25 MiB" });
+  expect(sent).toHaveLength(1);
+  const ssh = new SshReadOnlyAdapter({ runner: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0, capExceeded: false }) });
+  const command = { kind: "hermes" as const, remoteCommand: "true", byteCap: 1, nulSeparated: false };
+  expect(ssh.buildArgv("h", { ...command, stdin: bytes })).not.toContain("-n");
+  expect(ssh.buildArgv("h", command)).toContain("-n");
 });

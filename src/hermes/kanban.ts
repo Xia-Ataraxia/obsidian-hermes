@@ -1,7 +1,7 @@
 /** Kanban over SSH: each read is one POSIX sh script (sqlite3 read-only through the PRELUDE `ro`), each write one `hermes kanban` verb. */
 import type { SshReadOnlyAdapter } from "../ui/ssh-read-only-adapter";
 import { profileDir, type Outcome } from "./data";
-import { b64Arg, json, runScript, safeToken, type RemoteResult, type Sections } from "./remote";
+import { b64Arg, json, readBytes, runScript, safeToken, type RemoteResult, type Sections } from "./remote";
 
 /* ───────────────────────── Types ───────────────────────── */
 
@@ -31,11 +31,15 @@ export interface ChildRef extends Ref { result?: string; summary?: string }
 export interface TaskComment { id: number; author?: string; body: string; at: number }
 export interface TaskEvent { id: number; kind: string; payload?: unknown; at: number }
 export interface Run { id: number; profile?: string; status?: string; outcome?: string; summary?: string; error?: string; metadata?: unknown; startedAt?: number; endedAt?: number }
-export interface Attachment { id: number; name: string; size?: number; type?: string; by?: string; at: number }
+export interface Attachment { id: number; name: string; size?: number; type?: string; by?: string; at: number; path?: string }
 export interface Detail {
   task: TaskRow; parents: Ref[]; children: ChildRef[]; comments: TaskComment[]; eventCount: number; events: TaskEvent[]; runs: Run[];
   attachments: Attachment[]; log?: { size: number; text: string };
+  /** The board's attachments folder as the host resolves it (`pwd -P`); downloads must sit under it. */
+  attachRoot?: string;
 }
+/** A notification target: a platform's home channel, or a task's subscription. */
+export interface NotifyTarget { platform: string; chat: string; thread: string; name?: string }
 export interface Diagnostic {
   kind: string; severity: string; title: string; detail?: string;
   actions: { kind: string; label: string; payload?: unknown; suggested?: boolean }[]; count?: number; last_seen_at?: number;
@@ -61,7 +65,9 @@ export type Verb =
   | { verb: "edit"; id: string; title?: string; body?: string; priority?: number }
   | { verb: "link" | "unlink"; id: string; child: string }
   | { verb: "comment"; id: string; text: string }
-  | { verb: "attach-rm"; id: string; attachment: number };
+  | { verb: "attach-rm"; id: string; attachment: number }
+  | { verb: "attach"; id: string; name: string; type?: string; bytes: Uint8Array }
+  | { verb: "notify-subscribe" | "notify-unsubscribe"; id: string; platform: string; chat: string; thread?: string };
 /** `settings` rewrites a live board through `boards create` (there is no edit verb); `rm` archives it. */
 export type BoardVerb =
   | { verb: "create" | "settings"; slug: string; name: string; description: string; icon: string; color: string; workdir: string }
@@ -74,6 +80,10 @@ const dbPath = (slug: string): string => slug === "default" ? `"$H/kanban.db"` :
 /** Stops a script on a board without a db, with a plain message. sqlite3 reads need it, and so does `boards create`
  *  (settings reuse it), which revives an archived board; the CLI itself refuses to recreate a named board's db. */
 const live = (slug: string): string => `[ -f ${dbPath(slug)} ] || { echo "Board '${safeToken(slug)}' has no database" >&2; exit 1; }\n`;
+/** Hermes's attachments_root() for an explicit --board; a host-side HERMES_KANBAN_ATTACHMENTS_ROOT pin is not seen, so downloads there are refused. */
+const attachRoot = (slug: string): string => slug === "default" ? `"$H/kanban/attachments"` : `"$H/kanban/boards/${safeToken(slug)}/attachments"`;
+/** Hermes's own cap (KANBAN_ATTACHMENT_MAX_BYTES), for uploads and downloads alike. */
+export const MAX_ATTACHMENT = 25 * 1024 * 1024;
 /** The board dirs that both board loops (LIST, EVENTS) skip, as one shell case pattern. */
 const SKIP_BOARDS = "_*|-*|default|*[!A-Za-z0-9_.-]*";
 
@@ -154,8 +164,9 @@ select json_patch('{}',json_object(
    from (select * from task_events where task_id=${tid} order by id desc limit 20))),
  'runs',json((select json_group_array(json_patch('{}',json_object('id',id,'profile',profile,'status',status,'outcome',outcome,'summary',summary,'error',substr(error,1,600),
    'metadata',case when json_valid(metadata) then json(metadata) end,'startedAt',started_at,'endedAt',ended_at))) from (select * from task_runs where task_id=${tid} order by started_at,id))),
- 'attachments',json((select json_group_array(json_patch('{}',json_object('id',id,'name',filename,'size',size,'type',content_type,'by',uploaded_by,'at',created_at))) from task_attachments where task_id=${tid}))));
+ 'attachments',json((select json_group_array(json_patch('{}',json_object('id',id,'name',filename,'size',size,'type',content_type,'by',uploaded_by,'at',created_at,'path',stored_path))) from task_attachments where task_id=${tid}))));
 SQL
+S aroot; (cd -P ${attachRoot(slug)} 2>/dev/null && pwd -P) || :
 f=${log}; [ -f "$f" ] && { S log; wc -c < "$f"; tail -c 100000 "$f" | tr -d '\036'; }
 S end`;
 }
@@ -178,6 +189,11 @@ function eventsScript(cursors: Record<string, number>): string {
   });
   return `cur() { case "$1" in ${arms.join(" ")} *) echo -1;; esac; }\n${EVENTS}`;
 }
+
+/** `hc <path>`: each platform object at that JSON path of stdin (a `config get --json` dump) that has a home_channel, as
+ *  {platform: {chat_id, thread_id, name}}; a home_channel that is not a mapping maps to null, which drops an earlier one. */
+const HC = String.raw`hc() { sqlite3 :memory: -cmd '.mode ascii' -cmd 'create table t(j)' -cmd '.import /dev/stdin t' -cmd '.mode list' "select json_group_object(key, case when json_type(value,'\$.home_channel')='object' then json_object('chat_id',cast(json_extract(value,'\$.home_channel.chat_id') as text),'thread_id',cast(json_extract(value,'\$.home_channel.thread_id') as text),'name',json_extract(value,'\$.home_channel.name')) end) from t, json_each(t.j,'$1') where key<>'platforms' and case when type='object' then json_type(value,'\$.home_channel') end is not null" 2>/dev/null; }
+`;
 
 /* ───────────────────────── Parsers ───────────────────────── */
 
@@ -216,15 +232,30 @@ export function parseBoard(sections: Sections, previous: Card[] = []): BoardRead
 }
 
 function parseDetail(sections: Sections): Detail | null {
-  const detail = obj(sections.get("detail")), log = sections.get("log");
+  const detail = obj(sections.get("detail")), log = sections.get("log"), aroot = sections.get("aroot");
   if (!isRec(detail.task)) return null;
   const cut = log?.indexOf("\n") ?? -1;
   return {
     task: detail.task as unknown as TaskRow, parents: list(detail.parents), children: list(detail.children), comments: list(detail.comments),
     eventCount: typeof detail.eventCount === "number" ? detail.eventCount : 0, events: list(detail.events), runs: list(detail.runs),
-    attachments: list(detail.attachments),
+    attachments: list(detail.attachments), ...(aroot ? { attachRoot: aroot } : {}),
     ...(log === undefined ? {} : { log: { size: Number.parseInt(log, 10) || 0, text: cut < 0 ? "" : log.slice(cut + 1) } }),
   };
+}
+
+// eslint-disable-next-line no-control-regex -- control characters never belong in a path handed to the host
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** stored_path when it is exactly `<root>/<task id>/<file>` under the board's attachments folder, else null.
+ *  Plain segments only (no `.`, `..` or empty ones); the host checks the same again with symlinks resolved. */
+export function attachmentPath(stored: string | undefined, root: string | undefined, taskId: string): string | null {
+  if (!stored || !root || CONTROL.test(stored + root)) return null;
+  const segments = (path: string): string[] | null => {
+    const parts = path.split("/");
+    return parts[0] === "" && parts.slice(1).every(part => part && part !== "." && part !== "..") ? parts.slice(1) : null;
+  };
+  const s = segments(stored), r = segments(root);
+  return s && r && s.length === r.length + 2 && r.every((part, i) => s[i] === part) && s[r.length] === taskId ? stored : null;
 }
 
 function parseFeed(sections: Sections): Feed {
@@ -340,6 +371,11 @@ export function verb(v: Verb): string {
     case "link": case "unlink": return `${v.verb} -- ${id} ${safeToken(v.child)}`;
     case "comment": return `comment --author=obsidian -- ${id} ${b64Arg(v.text)}`;
     case "attach-rm": return `attach-rm -- ${int(v.attachment)}`;
+    // "$t" is the temp file run() writes the bytes to.
+    case "attach": return `attach --author=obsidian${flag("name", v.name)}${flag("content-type", v.type)} -- ${id} "$t"`;
+    // The default profile's gateway owns the home channels homes() reads, so it delivers.
+    case "notify-subscribe": case "notify-unsubscribe":
+      return `${v.verb}${flag("platform", v.platform)}${flag("chat-id", v.chat)}${flag("thread-id", v.thread)}${v.verb === "notify-subscribe" ? " --notifier-profile=default" : ""} -- ${id}`;
   }
 }
 
@@ -415,6 +451,37 @@ export class KanbanClient {
     return result.ok ? parseDetail(result.sections) ?? `No task ${id} on this board` : result.message;
   }
 
+  /** The task's notify subscriptions, and each platform's home channel from the default profile's config.yaml merged like
+   *  Hermes's gateway loader (gateway.platforms.*, then platforms.*, then gateway.<platform>; later wins per platform).
+   *  A home channel set only in .env or gateway.json is not seen. The config never leaves the host, only hc's fields. */
+  async homes(alias: string, slug: string, id: string): Promise<{ homes: NotifyTarget[]; subs: NotifyTarget[] } | string> {
+    const result = await runScript(this.adapter, alias, `${live(slug)}${HC}S subs; hermes kanban --board ${safeToken(slug)} notify-list --json -- ${safeToken(id)} </dev/null || exit 1
+g=$(hermes -p default config get gateway --json 2>/dev/null </dev/null)
+S home1; printf '%s\\n' "$g" | hc '$.platforms'
+S home2; hermes -p default config get platforms --json 2>/dev/null </dev/null | hc '$'
+S home3; printf '%s\\n' "$g" | hc '$'
+S end`, 256 * 1024);
+    if (!result.ok) return result.message;
+    const merged = { ...obj(result.sections.get("home1")), ...obj(result.sections.get("home2")), ...obj(result.sections.get("home3")) };
+    const homes = Object.entries(merged).map(([platform, value]) => {
+      const home = rec(value);
+      return { platform, chat: str(home.chat_id), thread: str(home.thread_id), name: str(home.name) || "Home" };
+    }).filter(home => home.chat).sort((a, b) => a.platform.localeCompare(b.platform));
+    const subs = list<unknown>(json<unknown>(result.sections.get("subs"), null)).map(rec)
+      .map(sub => ({ platform: str(sub.platform), chat: str(sub.chat_id), thread: str(sub.thread_id) }));
+    return { homes, subs };
+  }
+
+  /** An attachment's bytes, only from `<board attachments>/<task id>/`: checked here, then on the host with symlinks resolved. */
+  async download(alias: string, slug: string, id: string, a: Attachment, root: string | undefined): ReturnType<typeof readBytes> {
+    const path = attachmentPath(a.path, root, id);
+    if (!path) return { ok: false, message: "This attachment is outside the board's folder" };
+    if ((a.size ?? 0) > MAX_ATTACHMENT) return { ok: false, message: "Larger than 25 MiB" };
+    return readBytes(this.slow, alias, `p=${b64Arg(path)}; r=$(cd -P ${attachRoot(slug)} && pwd -P) || exit 1
+d=$(cd -P "$(dirname "$p")" && pwd -P) && [ "$d" = "$r/${safeToken(id)}" ] && [ "$d/$(basename "$p")" = "$p" ] && [ -f "$p" ] && [ ! -L "$p" ] || { echo "Not an attachment of this task" >&2; exit 1; }
+cat -- "$p"`, (a.size || MAX_ATTACHMENT) + 64);
+  }
+
   /** live() stops a board without a db with a plain message; for a named board the CLI refuses too
    *  ("does not exist; create it with ..." or "is archived; refusing to recreate its database"). */
   async diagnostics(alias: string, slug: string): Promise<Record<string, Diagnostic[]> | string> {
@@ -433,6 +500,16 @@ export class KanbanClient {
   }
 
   async run(alias: string, slug: string, v: Verb): Promise<Outcome> {
+    if (v.verb === "attach") {
+      if (v.bytes.length > MAX_ATTACHMENT) return { ok: false, message: "Larger than 25 MiB" };
+      // The bytes ride ssh's stdin into a temp file the trap removes; the size check catches a short write.
+      // ponytail: one 120 s ssh call carries all the bytes, so a full 25 MiB needs ~0.2 MiB/s; chunk the upload if slow links need it
+      return outcome(await runScript(this.slow, alias, `t=$(mktemp "\${TMPDIR:-/tmp}/hermes-attach.XXXXXX") || exit 1
+trap 'rm -f "$t"' EXIT; trap 'exit 1' HUP INT TERM
+cat > "$t" || exit 1
+[ $(wc -c < "$t") -eq ${v.bytes.length} ] || { echo "Upload incomplete" >&2; exit 1; }
+hermes kanban --board ${safeToken(slug)} ${verb(v)} </dev/null >/dev/null && S ok`, 64 * 1024, v.bytes));
+    }
     if (v.verb === "block") this.mine.set(v.id, Date.now());
     const result = await this.kanban(alias, `--board ${safeToken(slug)} ${verb(v)}`, "", v.verb === "specify" || v.verb === "decompose" ? this.slow : this.adapter);
     if (v.verb === "block" && !result.ok) this.mine.delete(v.id);

@@ -57,12 +57,14 @@ export function shellCommand(script: string): string {
   return `sh -c "$(printf %s ${encoded} | base64 -d)"`;
 }
 
-export async function runScript(adapter: SshReadOnlyAdapter, alias: string, script: string, byteCap = 4 * 1024 * 1024): Promise<RemoteResult> {
+/** `stdin` bytes reach the script's standard input; the script itself still travels in the argv. */
+export async function runScript(adapter: SshReadOnlyAdapter, alias: string, script: string, byteCap = 4 * 1024 * 1024, stdin?: Uint8Array): Promise<RemoteResult> {
   const outcome = await adapter.run(alias, {
     kind: "hermes",
     remoteCommand: shellCommand(script),
     byteCap,
     nulSeparated: false,
+    ...(stdin ? { stdin } : {}),
   });
   if (outcome.transport !== "connected") return { ok: false, transport: outcome.transport, message: outcome.stderr.trim() || outcome.transport };
   if (outcome.capExceeded) return { ok: false, transport: "connected", message: "Response too large" };
@@ -71,6 +73,19 @@ export async function runScript(adapter: SshReadOnlyAdapter, alias: string, scri
   const code = status ? Number(status[1]) : outcome.exitCode;
   if (code !== 0) return { ok: false, transport: "connected", message: outcome.stderr.trim().split("\n").pop() || `Exit ${code}` };
   return { ok: true, sections: parseSections(status ? outcome.stdout.slice(0, status.index) : outcome.stdout) };
+}
+
+/** Raw stdout bytes of a script (a binary `cat`), with the same exit-status check as `runScript`. */
+export async function readBytes(adapter: SshReadOnlyAdapter, alias: string, script: string, byteCap: number): Promise<{ readonly ok: true; readonly bytes: Uint8Array } | { readonly ok: false; readonly message: string }> {
+  const outcome = await adapter.run(alias, { kind: "hermes", remoteCommand: shellCommand(script), byteCap, nulSeparated: false });
+  if (outcome.transport !== "connected") return { ok: false, message: outcome.stderr.trim() || outcome.transport };
+  if (outcome.capExceeded) return { ok: false, message: "Response too large" };
+  const bytes = outcome.bytes ?? new Uint8Array();
+  // The status line is ASCII at the very end, so latin1 maps its bytes one to one.
+  const status = STATUS.exec(Buffer.from(bytes.subarray(-8)).toString("latin1"));
+  if (!status) return { ok: false, message: "No exit status from host" };
+  if (status[1] !== "0") return { ok: false, message: outcome.stderr.trim().split("\n").pop() || `Exit ${status[1]}` };
+  return { ok: true, bytes: bytes.subarray(0, bytes.length - status[0].length) };
 }
 
 export function json<T>(text: string | undefined, fallback: T): T {

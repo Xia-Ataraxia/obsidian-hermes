@@ -246,6 +246,7 @@ await mock.module("obsidian", () => ({
   Modal: class { constructor(public app: unknown) { /* stub */ } open() { modals.push(this); } close() { /* stub */ } setTitle() { /* stub */ } },
   Component: class {},
   AbstractInputSuggest: class {},
+  FuzzySuggestModal: class {},
   Menu: class {},
   Setting: class {},
   SuggestModal: class {},

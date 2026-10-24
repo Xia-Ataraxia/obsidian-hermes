@@ -19,6 +19,8 @@ export interface BoundRemoteCommand {
   readonly byteCap: number;
   /** True when the response is a NUL-separated enumeration. */
   readonly nulSeparated: boolean;
+  /** Bytes for the remote command's stdin; without them stdin is /dev/null (`ssh -n`). */
+  readonly stdin?: Uint8Array;
 }
 
 /** Why a command was refused. A refused command is never assembled. */
@@ -67,6 +69,8 @@ export interface RemoteExecOutcome {
   /** True when the application-side prefix bound was reached (received N+1 bytes). */
   readonly capExceeded: boolean;
   readonly transport: TransportStatus;
+  /** stdout before UTF-8 decoding, for binary reads. */
+  readonly bytes?: Uint8Array;
 }
 
 /** Injected process runner. Keeps the adapter testable without a real SSH connection. */
@@ -74,8 +78,8 @@ export interface RemoteRunner {
   (
     file: string,
     args: readonly string[],
-    options: { readonly timeoutMs: number; readonly maxBytes: number },
-  ): Promise<{ stdout: string; stderr: string; exitCode: number | null; capExceeded: boolean }>;
+    options: { readonly timeoutMs: number; readonly maxBytes: number; readonly stdin?: Uint8Array },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number | null; capExceeded: boolean; bytes?: Uint8Array }>;
 }
 
 /** Byte caps from plan section 4.5. */
