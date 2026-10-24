@@ -377,17 +377,21 @@ export class KanbanClient {
   /** `slow` carries specify and decompose, which wait on an LLM. */
   constructor(private readonly adapter: SshReadOnlyAdapter, private readonly slow = adapter) {}
 
-  /* Disk-cache hooks; chunk 5 wires them to disk. */
+  /* The in-memory side of the view's disk cache. What reaches disk is keepBoard(read) (cache.ts), a whitelist of
+     card metadata and titles, the stored board entries (name, description, workdir, icon, color, counts) and the
+     profile names, plus two layout flags of `config` (lane_by_profile, auto_decompose) written as the strings
+     "true"/"false": never the rest of `config`, bodies, comments, events or logs. `cacheData` hands back the full
+     read, so a caller that saves it passes it through keepBoard first. */
   cacheKey(alias: string, slug: string, archived: boolean): string {
     return `${alias}|${slug}|${archived ? 1 : 0}`;
   }
 
-  /** The last read for a key, already plain JSON. */
+  /** The last read for a key, in full; never save it as it is. */
   cacheData(key: string): BoardRead | undefined {
     return this.reads.get(key);
   }
 
-  /** Seeds a key from disk; false (nothing kept) when the shape is off. */
+  /** Seeds a key from a saved copy (its token is null, so the next live read is a full one); false (nothing kept) when the shape is off. */
   cacheRestore(key: string, data: unknown): boolean {
     const d = rec(data);
     const ok = typeof d.board === "string" && (typeof d.token === "string" || d.token === null)

@@ -251,6 +251,8 @@ export interface TaskHost {
   diagnostics(id: string): Diagnostic[];
   /** Run a verb, then refresh; resolves to the CLI error or null. */
   write(v: Verb): Promise<string | null>;
+  /** Why this host takes no more writes (the SSH host changed since it was built: its alias and board are stale), else null. */
+  moved(): string | null;
   open(id: string, focus?: Focus): void;
   close(): void;
 }
@@ -280,6 +282,8 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
     ],
     hint: v => v.workspace === "scratch" ? "This workspace and any files left in it are deleted when the task completes." : "",
     submit: async v => {
+      const moved = host.moved();
+      if (moved) return moved;
       const { title = "", body = "", assignee = "", priority = "", tenant = "", parent = "", skills = "", workspace = "scratch", path = "", branch = "", model = "", provider = "", maxRuntime = "", maxRetries = "", goal = "", goalMaxTurns = "" } = v;
       if (priority && !/^-?\d+$/.test(priority)) return "Priority must be a whole number";
       for (const [value, label] of [[maxRetries, "Max retries"], [goalMaxTurns, "Goal max turns"]] as const) {

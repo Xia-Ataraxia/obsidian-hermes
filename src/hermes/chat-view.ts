@@ -1,4 +1,5 @@
 import { Component, Menu, Notice, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { keepChat } from "./cache";
 import { reduce, SESSION_ID, sessionFrom, type ChatState, type Tool, type Turn, type Usage } from "./chat";
 import { renderSafe } from "./markdown";
 import { safeToken } from "./remote";
@@ -103,6 +104,7 @@ export class ChatView extends HermesView {
 
   /** Drops our ssh processes; the turns themselves finish on the server. */
   override async onClose(): Promise<void> {
+    await super.onClose();
     for (const stop of this.streams.values()) stop();
     this.streams.clear();
   }
@@ -146,6 +148,20 @@ export class ChatView extends HermesView {
     this.render();
     this.input.focus();
     if (sid) void this.reload();
+  }
+
+  /** Only the profile chips are kept; a thread, its title and its messages are always read live. */
+  protected override cacheKey(): string { return "chat"; }
+
+  protected override cacheData(): unknown { return keepChat(this.profiles); }
+
+  protected override cacheRestore(saved: unknown): boolean {
+    const list = (saved as { profiles?: unknown } | null)?.profiles;
+    this.profiles = [];
+    if (Array.isArray(list)) {
+      for (const p of list as ({ id?: unknown; live?: unknown } | null)[]) if (typeof p?.id === "string") this.profiles.push({ id: p.id, live: p.live === true });
+    }
+    return this.profiles.length > 0;
   }
 
   protected async pull(alias: string): Promise<string | null> {

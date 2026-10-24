@@ -1,5 +1,6 @@
 import { Menu, Notice, setIcon, setTooltip, SuggestModal, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { action, ask, askBlock, askComplete, COLUMNS, CONFIRM, confirmed, copy, diagCard, matches, message, openCreate, severityIcon, severityRank, suggestion, TaskDrawer, when, type Focus, type TaskHost } from "./kanban-drawer";
+import { keepBoard } from "./cache";
 import { dropVerb, staleness, STATUSES, type Alert, type BoardMeta, type BoardRead, type Card, type Diagnostic, type Drop, type Status, type Verb } from "./kanban";
 import { avatar, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
 
@@ -58,6 +59,8 @@ const NEEDS = "Dependencies are satisfied, but the dispatcher skips this task un
 const CAPPED = new Set<Status>(["done", "archived"]);
 const plural = (n: number): string => n === 1 ? "" : "s";
 const on = (v?: string): boolean => !/^(false|no|off|0)$/i.test(v ?? "");
+/** What a dialog left open across a host change gets back: the board and task ids it holds belong to the old host. */
+const MOVED = "The SSH host changed; open it again.";
 
 /** Rebuild a filter select only when its options change; returns the kept value ("" when it vanished). */
 function fill(select: HTMLSelectElement, all: string, options: [string, string][], value: string): string {
@@ -114,6 +117,25 @@ export class KanbanView extends HermesView {
   getDisplayText(): string { return "Hermes kanban"; }
   override getIcon(): string { return "square-kanban"; }
   protected override busy(): boolean { return !!this.dragging; }
+
+  protected override cacheKey(): string { return `kanban/${this.host.board(this.alias)}`; }
+
+  protected override cacheData(): unknown { return this.read && keepBoard(this.read); }
+
+  protected override cacheRestore(saved: unknown): boolean {
+    this.read = null;
+    if (saved == null) return false;
+    const slug = this.host.board(this.alias), client = this.host.kanban;
+    const key = client.cacheKey(this.alias, slug, !!this.prefs[slug]?.archived);
+    // A read from this session is fuller than the saved copy, so it wins.
+    const read = client.cacheData(key) ?? (client.cacheRestore(key, saved) ? client.cacheData(key) : undefined);
+    if (!read) return false;
+    this.adopt(this.alias, read);
+    return true;
+  }
+
+  /** A host change closes the drawer and drops the selection at once, like switchBoard; the base then empties `read` (cacheRestore(null)). */
+  protected override leaveHost(): void { this.resetTransient(); }
 
   override getState(): Record<string, unknown> {
     return { ...super.getState(), prefs: this.prefs };
@@ -178,6 +200,8 @@ export class KanbanView extends HermesView {
     this.dirty = null;
     const slug = this.host.board(alias);
     const r = await this.host.kanban.board(alias, slug, !!this.prefs[slug]?.archived, force);
+    // Closed while the read was in flight: no diagnostics read, drawer refresh or paint (the base class stops the rest).
+    if (this.closed) return null;
     if (alias !== this.alias || slug !== this.host.board(alias)) {
       // A stale read: the next pull, for the board shown now, still owes these.
       this.force ||= force;
@@ -186,12 +210,8 @@ export class KanbanView extends HermesView {
       return null;
     }
     if (typeof r === "string") return r;
-    if (`${alias}|${r.board}` !== this.key) {
-      this.key = `${alias}|${r.board}`;
-      this.resetTransient();
-    }
     const changed = r.tasks !== this.read?.tasks;
-    this.read = r;
+    this.adopt(alias, r);
     if (r.board !== slug) this.host.saveBoard(alias, r.board);
     if (changed) {
       const ids = new Set(r.tasks.map(c => c.id));
@@ -216,6 +236,15 @@ export class KanbanView extends HermesView {
       if (p.board === r.board) this.openTask(p.task);
     }
     return null;
+  }
+
+  /** Shows `r`, from a pull or from disk; another board or host starts clean. */
+  private adopt(alias: string, r: BoardRead): void {
+    if (`${alias}|${r.board}` !== this.key) {
+      this.key = `${alias}|${r.board}`;
+      this.resetTransient();
+    }
+    this.read = r;
   }
 
   /** Selection, filters, banners and the drawer belong to one board on one host. */
@@ -244,7 +273,7 @@ export class KanbanView extends HermesView {
     const seq = ++this.diagSeq;
     // ponytail: best effort; a failed read keeps the last diagnostics until the board changes again.
     const r = await this.host.kanban.diagnostics(alias, slug).catch(() => null);
-    if (seq !== this.diagSeq || !r || typeof r === "string" || alias !== this.alias || slug !== this.read?.board) return;
+    if (this.closed || seq !== this.diagSeq || !r || typeof r === "string" || alias !== this.alias || slug !== this.read?.board) return;
     const id = this.drawer?.id ?? "";
     const before = JSON.stringify(this.diags[id] ?? []);
     this.diags = r;
@@ -281,13 +310,15 @@ export class KanbanView extends HermesView {
   }
 
   private taskHost(): TaskHost {
+    const { alias } = this;
     return {
-      app: this.app, owner: this, alias: this.alias, slug: this.read?.board ?? this.host.board(this.alias),
+      app: this.app, owner: this, alias, slug: this.read?.board ?? this.host.board(alias),
       kanban: this.host.kanban, client: this.host.client,
       cards: () => this.read?.tasks ?? [],
       profiles: () => this.read?.profiles ?? [],
       diagnostics: id => this.diags[id] ?? [],
-      write: v => this.write(v),
+      write: v => this.alias === alias ? this.write(v) : Promise.resolve(MOVED),
+      moved: () => this.alias === alias ? null : MOVED,
       open: (id, focus) => this.openTask(id, focus),
       close: () => { this.closeDrawer(); this.render(); },
     };
@@ -301,8 +332,13 @@ export class KanbanView extends HermesView {
     this.render();
   }
 
-  /** Runs verbs in one round trip. With `to`, the cards move first and a failed one moves back. */
-  private async apply(verbs: Verb[], to?: Status): Promise<null> {
+  /**
+   * Runs verbs in one round trip. With `to`, the cards move first and a failed one moves back.
+   * `alias` is the host the dialog behind this call was opened on: once the host changed, the ids and the board belong to
+   * the old one, so the answer is MOVED and nothing is sent. Forms show it; the confirm-only callers drop it, like the picker's.
+   */
+  private async apply(alias: string, verbs: Verb[], to?: Status): Promise<string | null> {
+    if (alias !== this.alias) return MOVED;
     const r = this.read;
     if (!r || !verbs.length) return null;
     const cards = new Map(r.tasks.map((c): [string, Card] => [c.id, c]));
@@ -313,11 +349,11 @@ export class KanbanView extends HermesView {
     }
     this.render();
     const key = this.key;
-    const results = await this.host.kanban.bulk(this.alias, r.board, verbs).catch((e: unknown) => message(e));
-    // After a board or server switch (switchBoard() empties `read` at once) the marks, banner and landing belong to the
-    // old board: only the notice is left. Failed cards still move back: they are the client's cached objects, which the
-    // next read of that board reuses while its token is unchanged.
-    const same = this.key === key && this.read !== null, ok: string[] = [], errors: string[] = [];
+    const results = await this.host.kanban.bulk(alias, r.board, verbs).catch((e: unknown) => message(e));
+    // After a board or server switch (switchBoard() empties `read` at once) or a close, the marks, banner and landing
+    // belong to the old board: only the notice is left. Failed cards still move back: they are the client's cached
+    // objects, which the next read of that board reuses while its token is unchanged.
+    const same = !this.closed && this.key === key && this.read !== null, ok: string[] = [], errors: string[] = [];
     let unsure = "";
     for (const v of verbs) {
       const o = typeof results === "string" ? { ok: false as const, message: results } : results[v.id] ?? { ok: false as const, message: "No result from the host" };
@@ -346,7 +382,7 @@ export class KanbanView extends HermesView {
   }
 
   private async drop(ids: string[], to: Status): Promise<void> {
-    const r = this.read;
+    const r = this.read, alias = this.alias;
     if (!r) return;
     const label = COLUMNS[to].label;
     const go: [Card, Drop][] = [];
@@ -363,25 +399,31 @@ export class KanbanView extends HermesView {
       return;
     }
     const cards = go.map(([c]) => c);
-    if (to === "blocked") return askBlock(this.app, cards, (kind, reason) => this.apply(cards.map((c): Verb => ({ verb: "block", id: c.id, kind, reason })), to));
-    if (to === "done") return askComplete(this.app, cards.length, (summary, result) => this.apply(cards.map((c): Verb => ({
+    if (to === "blocked") return askBlock(this.app, cards, (kind, reason) => this.apply(alias, cards.map((c): Verb => ({ verb: "block", id: c.id, kind, reason })), to));
+    if (to === "done") return askComplete(this.app, cards.length, (summary, result) => this.apply(alias, cards.map((c): Verb => ({
       verb: "complete", id: c.id, ...(summary ? { summary } : {}), ...(result ? { result } : {}), ...(c.status === "running" ? { force: true } : {}),
     })), to));
     if (to === "archived" && !await confirmed(this.app, "Archive", cards.length === 1 ? CONFIRM.archive : `Archive ${cards.length} tasks?`, "Archive", true)) return;
     if (go.some(([, d]) => d === "reclaim") && !await confirmed(this.app, "Reclaim", CONFIRM.reclaim, "Reclaim", true)) return;
-    await this.apply(go.map(([c, d]): Verb => d === "reclaim" ? { verb: d, id: c.id, reason: "reclaimed from Obsidian" } : { verb: d, id: c.id } as Verb), to);
+    await this.apply(alias, go.map(([c, d]): Verb => d === "reclaim" ? { verb: d, id: c.id, reason: "reclaimed from Obsidian" } : { verb: d, id: c.id } as Verb), to);
   }
 
   private async assign(cards: Card[], profile: string | null): Promise<void> {
+    const alias = this.alias;
     if (cards.some(c => c.status === "running") && !await confirmed(this.app, "Reassign", CONFIRM.reclaim, "Reassign", true)) return;
-    await this.apply(cards.map((c): Verb => c.status === "running"
+    await this.apply(alias, cards.map((c): Verb => c.status === "running"
       ? { verb: "reassign", id: c.id, profile, reason: "reassigned from Obsidian" }
       : { verb: "assign", id: c.id, profile }));
   }
 
   private async nudge(): Promise<void> {
+    const alias = this.alias;
     if (!await confirmed(this.app, "Nudge dispatcher", "Wake the dispatcher to claim up to 8 ready tasks now?", "Nudge")) return;
-    const r = await this.host.kanban.nudge(this.alias, this.read?.board ?? this.host.board(this.alias))
+    if (alias !== this.alias) {
+      new Notice(MOVED);
+      return;
+    }
+    const r = await this.host.kanban.nudge(alias, this.read?.board ?? this.host.board(alias))
       .catch((e: unknown) => ({ ok: false as const, message: message(e) }));
     new Notice(r.ok ? r.text || "Dispatcher nudged; nothing to spawn." : r.message, 10_000);
     void this.reload();
@@ -461,6 +503,7 @@ export class KanbanView extends HermesView {
   private openSwitcher(): void {
     const r = this.read;
     if (!r) return;
+    const alias = this.alias;
     const items: Item[] = [...r.boards.filter(b => !b.archived).map((meta): Item => ({ kind: "board", meta })), { kind: "new" }, { kind: "settings" }];
     if (r.board !== "default") items.push({ kind: "archive" });
     const label = (i: Item): string => i.kind === "board" ? i.meta.name || i.meta.slug
@@ -472,6 +515,8 @@ export class KanbanView extends HermesView {
       suggestion(el, label(i), `${total} task${plural(total)}${blocked ? ` · ${blocked} blocked` : ""}${i.meta.slug === r.board ? " · current" : ""}`);
     };
     const choose = (i: Item): void => {
+      // The picker and the dialogs behind it can outlive a host change; `r` and its board belong to the old host.
+      if (alias !== this.alias) return;
       if (i.kind === "board") {
         if (i.meta.slug !== r.board) this.switchBoard(i.meta.slug);
         return;
@@ -479,7 +524,7 @@ export class KanbanView extends HermesView {
       const meta = this.meta();
       if (i.kind === "archive") {
         void confirmed(this.app, "Archive board", `Archive board '${meta?.name || r.board}'? Its tasks are kept on the host.`, "Archive", true).then(async yes => {
-          if (!yes) return;
+          if (!yes || alias !== this.alias) return;
           const o = await this.host.kanban.boards(this.alias, { verb: "rm", slug: r.board }).catch((e: unknown) => ({ ok: false as const, message: message(e) }));
           if (!o.ok) new Notice(o.message, 10_000);
           else this.switchBoard("default");
@@ -501,6 +546,7 @@ export class KanbanView extends HermesView {
         ],
         ...(settings ? {} : { follow: { from: "name", to: "slug", map: (v: string) => v.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 64) } }),
         submit: async v => {
+          if (alias !== this.alias) return MOVED;
           const slug = settings ? r.board : v.slug ?? "";
           if (!settings && r.boards.some(b => b.slug === slug)) return `Board '${slug}' already exists`;
           const o = await this.host.kanban.boards(this.alias, {
@@ -675,6 +721,8 @@ export class KanbanView extends HermesView {
   }
 
   private bulkBar(r: BoardRead, visible: Card[]): void {
+    // The dialogs opened from this bar hold its cards: they are applied to the host the bar was drawn for, or not at all.
+    const alias = this.alias;
     const cards = r.tasks.filter(c => this.selected.has(c.id));
     const ids = cards.map(c => c.id);
     const n = cards.length;
@@ -689,7 +737,7 @@ export class KanbanView extends HermesView {
         return;
       }
       void confirmed(this.app, "Unblock", `Unblock ${stuck.length} task${plural(stuck.length)}?`, "Unblock").then(yes => {
-        if (yes) void this.apply(stuck.map((c): Verb => ({ verb: "unblock", id: c.id })), "ready");
+        if (yes) void this.apply(alias, stuck.map((c): Verb => ({ verb: "unblock", id: c.id })), "ready");
       });
     }, "lock-open", "Unblock the selected blocked or scheduled tasks");
     action(bar, "Complete…", () => void this.drop(ids, "done"), COLUMNS.done.icon, "Mark the selected tasks done");
@@ -701,8 +749,7 @@ export class KanbanView extends HermesView {
       submit: async v => {
         const priority = Number(v.priority);
         if (!Number.isInteger(priority)) return "Priority must be a whole number";
-        await this.apply(cards.map((c): Verb => ({ verb: "edit", id: c.id, priority })));
-        return null;
+        return this.apply(alias, cards.map((c): Verb => ({ verb: "edit", id: c.id, priority })));
       },
     }), "arrow-up-down", "Set the priority of the selected tasks");
     const assign = bar.createEl("select", { cls: "dropdown hm-k-select" });
@@ -718,7 +765,7 @@ export class KanbanView extends HermesView {
     });
     if (cards.every(c => c.status === "archived")) action(bar, "Delete permanently", () => {
       void confirmed(this.app, "Delete permanently", `Delete ${n} archived task${plural(n)} permanently? This can't be undone.`, "Delete", true).then(yes => {
-        if (yes) void this.apply(cards.map((c): Verb => ({ verb: "purge", id: c.id })));
+        if (yes) void this.apply(alias, cards.map((c): Verb => ({ verb: "purge", id: c.id })));
       });
     }, "trash-2").addClass("mod-warning");
     action(bar, "Select all", () => {

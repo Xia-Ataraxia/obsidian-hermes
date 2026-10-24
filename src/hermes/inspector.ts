@@ -3,6 +3,7 @@ import { resolveInstant } from "../domain/instant-timezone-resolver";
 import type { LedgerReadResult } from "../types/snapshot";
 import { SOURCE_LABEL } from "../ui/notices";
 import { ActivityPane } from "./activity-pane";
+import { keepDetail } from "./cache";
 import type { CronJob, Outcome, Profile } from "./data";
 import { byLeastRecent, EDIT_CAP, pluginLastUsed, type Detail, type PluginInfo, type SkillInfo, type Source, type ToolUse } from "./inspect";
 import { confirmed } from "./kanban-drawer";
@@ -232,9 +233,29 @@ export class ProfileModal extends Modal {
   private async load(fresh = false): Promise<void> {
     const { alias, profileId } = this;
     this.detail = this.host.inspect.cached(alias, profileId) ?? this.detail;
+    // Nothing in memory yet (the first open since a reload or a host switch): the rows saved last time paint meanwhile.
+    if (!this.detail) void this.restore(alias, profileId).catch(console.error);
     const read = await this.host.inspect.detail(alias, profileId, fresh).catch(message);
     if (!this.opened || alias !== this.alias || profileId !== this.profileId) return;
-    if (typeof read !== "string") { this.detail = this.host.inspect.cached(alias, profileId) ?? read; this.error = null; } else if (!this.detail) this.error = read;
+    if (typeof read !== "string") {
+      const detail = this.host.inspect.cached(alias, profileId) ?? read;
+      this.detail = detail;
+      this.error = null;
+      // ponytail: saved on every live read, which only follows the user opening or refreshing this window.
+      this.host.cache.save(alias, `inspector/${profileId}`, keepDetail(detail));
+    } else if (!this.detail) this.error = read;
+    this.renderRail();
+    if (!this.editor && ["skills", "plugins", "cron"].includes(this.tab)) this.renderPane(true);
+  }
+
+  /** Paints the saved skill and plugin rows; the live read, which replaces them, is already on its way. */
+  private async restore(alias: string, profileId: string): Promise<void> {
+    const saved = await this.host.cache.load(alias, `inspector/${profileId}`);
+    if (!saved || this.detail || !this.opened || alias !== this.alias || profileId !== this.profileId) return;
+    const { skills, plugins } = (saved.data ?? {}) as { skills?: unknown; plugins?: unknown };
+    const rows = (list: unknown): list is Record<string, unknown>[] => Array.isArray(list) && list.every((row: unknown) => typeof (row as { name?: unknown } | null)?.name === "string");
+    if (!rows(skills) || !rows(plugins) || !skills.every(skill => typeof skill.source === "string" && Object.hasOwn(SOURCES, skill.source))) return;
+    this.detail = saved.data as Detail;
     this.renderRail();
     if (!this.editor && ["skills", "plugins", "cron"].includes(this.tab)) this.renderPane(true);
   }
@@ -286,7 +307,7 @@ export class ProfileModal extends Modal {
     const picker = new ModelPicker(this.app, pairs, [profile.model, profile.provider], async ([model, provider]) => {
       // A poll re-renders the head while the picker is open, so spin the stat that is there now.
       const el = this.head.querySelector(".hm-stat.is-action");
-      el?.addClass("is-spinning");
+      el?.addClass("hm-spinning");
       try {
         const outcome = await this.host.client.setModel(alias, profile.id, model, provider, profile.provider);
         if (!outcome.ok) return void new Notice(outcome.message);
@@ -294,7 +315,7 @@ export class ProfileModal extends Modal {
       } catch (error) {
         new Notice(error instanceof Error ? error.message : String(error));
       } finally {
-        el?.removeClass("is-spinning");
+        el?.removeClass("hm-spinning");
       }
     });
     picker.open();
