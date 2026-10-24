@@ -363,7 +363,7 @@ export class ChatView extends HermesView {
       if (turn) {
         now.createDiv({ cls: "hm-chat-user", text: turn.user });
         this.chips(now, turn.tools);
-        if (!turn.done) this.live = now.createDiv("hm-chat-live").appendChild(document.createTextNode(turn.text));
+        if (!turn.done) this.live = now.createDiv("hm-chat-live").appendChild(now.doc.createTextNode(turn.text));
         else if (turn.text) markdown(now, this.turnMd, turn.text);
         if (turn.done) this.outcome(now, turn, s);
         if (turn.usage) this.foot(now, turn.usage);

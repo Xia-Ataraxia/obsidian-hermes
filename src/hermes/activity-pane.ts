@@ -178,7 +178,7 @@ export class ActivityPane {
       this.dispose();
       return;
     }
-    if (document.hidden || !this.root.isShown()) return;
+    if (this.root.doc.hidden || !this.root.isShown()) return;
     this.stampText();
     void this.refresh();
   }

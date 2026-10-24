@@ -204,7 +204,7 @@ export function profileDir(id: string): string {
 
 /* ───────────────────────── Client ───────────────────────── */
 
-export type Outcome = { readonly ok: true } | { readonly ok: false; readonly message: string };
+export type Outcome = { readonly ok: true } | { readonly ok: false; readonly message: string; readonly unknown?: true };
 
 /** Every read is a deterministic file or sqlite read; every write goes through the `hermes` CLI. */
 export class HermesClient {
@@ -224,11 +224,14 @@ export class HermesClient {
   }
 
   /** Provider first, so the CLI drops the old provider's base_url; a blank provider is left as is. */
-  async setModel(alias: string, profile: string, model: string, provider: string): Promise<Outcome> {
+  async setModel(alias: string, profile: string, model: string, provider: string, was = ""): Promise<Outcome> {
     // The CLI would read a leading "-" as a flag; `--help` even exits 0, i.e. a write that never happened.
     if (model.startsWith("-") || provider.startsWith("-")) return { ok: false, message: "Model and provider cannot start with -" };
-    const set = (key: string, value: string): string => `hermes -p ${safeToken(profile)} config set ${key} ${b64Arg(value)} </dev/null >/dev/null && `;
-    const script = `${provider ? set("model.provider", provider) : ""}${set("model.default", model)}S ok`;
+    const set = (key: string, value: string): string => `hermes -p ${safeToken(profile)} config set ${key} ${b64Arg(value)} </dev/null >/dev/null`;
+    // A model write that fails after the provider write puts the old provider `was` back, or says it could not.
+    // ponytail: the base_url the provider write dropped stays dropped; reading and restoring config.yaml whole would fix that.
+    const undo = `${was ? `${set("model.provider", was)} && echo "Model not set; the old provider is back" >&2 || ` : ""}echo "Model not set, but the provider changed (partially applied)" >&2; exit 1`;
+    const script = provider ? `${set("model.provider", provider)} && { ${set("model.default", model)} || { ${undo}; }; } && S ok` : `${set("model.default", model)} && S ok`;
     return this.outcome(await runScript(this.adapter, alias, script, 64 * 1024));
   }
 

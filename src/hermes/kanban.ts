@@ -74,6 +74,8 @@ const dbPath = (slug: string): string => slug === "default" ? `"$H/kanban.db"` :
 /** Stops a script on a board without a db, with a plain message. sqlite3 reads need it, and so does `boards create`
  *  (settings reuse it), which revives an archived board; the CLI itself refuses to recreate a named board's db. */
 const live = (slug: string): string => `[ -f ${dbPath(slug)} ] || { echo "Board '${safeToken(slug)}' has no database" >&2; exit 1; }\n`;
+/** The board dirs that both board loops (LIST, EVENTS) skip, as one shell case pattern. */
+const SKIP_BOARDS = "_*|-*|default|*[!A-Za-z0-9_.-]*";
 
 /** Board list with per-status counts, assignable profiles and the config's kanban block. */
 const LIST = String.raw`counts() { ro "$1" <<'SQL'
@@ -84,13 +86,13 @@ S "meta default"; cat "$H/kanban/boards/default/board.json" 2>/dev/null
 [ -f "$H/kanban.db" ] && { S "counts default"; counts "$H/kanban.db"; }
 for d in "$H"/kanban/boards/*/; do
   s=$(basename "$d")
-  case "$s" in _*|default|*[!A-Za-z0-9_.-]*) continue;; esac
+  case "$s" in ${SKIP_BOARDS}) continue;; esac
   [ -f "$d/board.json" ] || [ -f "$d/kanban.db" ] || continue
   S "meta $s"; cat "$d/board.json" 2>/dev/null
   [ -f "$d/kanban.db" ] && { S "counts $s"; counts "$d/kanban.db"; }
 done
 S profiles; for d in "$H"/profiles/*/; do s=$(basename "$d"); [ "$s" != default ] && [ -f "$d/config.yaml" ] && echo "$s"; done
-S config; awk '/^kanban:/{f=1;next} f&&/^[^ #]/{exit} f' "$H/config.yaml" 2>/dev/null | grep -viE 'key|token|secret|pass' || true`;
+S config; awk '/^kanban:/{f=1;next} f&&/^[^ #]/{exit} f' "$H/config.yaml" 2>/dev/null | grep -E '^ +(lane_by_profile|auto_decompose|orchestrator_profile|default_assignee):' || true`;
 
 // ponytail: token = last event id + task count, so heartbeat and claim changes wait for the next event (D29)
 function boardScript(slug: string, last: string | null, archived: boolean): string {
@@ -154,7 +156,7 @@ select json_patch('{}',json_object(
    'metadata',case when json_valid(metadata) then json(metadata) end,'startedAt',started_at,'endedAt',ended_at))) from (select * from task_runs where task_id=${tid} order by started_at,id))),
  'attachments',json((select json_group_array(json_patch('{}',json_object('id',id,'name',filename,'size',size,'type',content_type,'by',uploaded_by,'at',created_at))) from task_attachments where task_id=${tid}))));
 SQL
-f=${log}; [ -f "$f" ] && { S log; wc -c < "$f"; tail -c 100000 "$f"; }
+f=${log}; [ -f "$f" ] && { S log; wc -c < "$f"; tail -c 100000 "$f" | tr -d '\036'; }
 S end`;
 }
 
@@ -166,7 +168,7 @@ select json_object('max',coalesce((select max(id) from task_events),0),'rows',js
 SQL
 }
 ev default "$H/kanban.db" "$H/kanban/boards/default/board.json"
-for d in "$H"/kanban/boards/*/; do s=$(basename "$d"); case "$s" in _*|default|*[!A-Za-z0-9_.-]*) continue;; esac; ev "$s" "$d/kanban.db" "$d/board.json"; done
+for d in "$H"/kanban/boards/*/; do s=$(basename "$d"); case "$s" in ${SKIP_BOARDS}) continue;; esac; ev "$s" "$d/kanban.db" "$d/board.json"; done
 S end`;
 
 /** Unknown boards get cursor -1: the first read only seeds `max`. */
@@ -435,7 +437,7 @@ export class KanbanClient {
 
   /** Chunks of CHUNK verbs, one script each on the slow adapter, one after another. In a chunk all archives share one
    *  CLI call and all purges another; every other verb gets its own, so each failure keeps its own stderr. A failed
-   *  chunk stops the run, and the ids after it come back skipped. */
+   *  chunk stops the run: its own ids come back unknown (any of them may have run), the ids after it skipped. */
   async bulk(alias: string, slug: string, verbs: Verb[]): Promise<Record<string, Outcome>> {
     const board = safeToken(slug), now = Date.now(), results: Record<string, Outcome> = {};
     for (const v of verbs) if (v.verb === "block") this.mine.set(v.id, now);
@@ -451,7 +453,7 @@ export class KanbanClient {
       ].filter(Boolean).join("\n");
       const result = await runScript(this.slow, alias, script, 256 * 1024);
       if (!result.ok) {
-        for (const v of chunk) results[v.id] = { ok: false, message: result.message };
+        for (const v of chunk) results[v.id] = { ok: false, unknown: true, message: result.message };
         for (const v of verbs.slice(i + CHUNK)) results[v.id] = { ok: false, message: "Skipped: an earlier batch failed" };
         break;
       }

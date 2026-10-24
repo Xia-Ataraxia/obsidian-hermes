@@ -60,7 +60,7 @@ export type ToolUse = Readonly<Record<string, number>>;
 const CHANGED = "Changed on the server. Reload first.";
 const SECRET = /key|token|secret|password|auth/i;
 const KINDS = new Set(["standalone", "backend", "exclusive", "platform", "model-provider"]);
-export const EDIT_CAP = 128 * 1024;
+export const EDIT_CAP = 64 * 1024;
 
 /** `$sk` = the config's skills block, `$pl` = its plugins block plus `memory.provider`. Runs in the profile dir. */
 const CONFIG = `N='
@@ -120,8 +120,10 @@ done
 src=
 while read -r t r; do
   [ -d "$r" ] || continue
-  set -- "$r"
+  set -- "$r"; set -f; IFS='
+'
   for l in $(find "$r" -type l); do [ -d "$l" ] && set -- "$@" "$l/"; done
+  set +f; unset IFS
   for d; do case "$d" in *"'"*) continue ;; esac; src="\${src:+$src UNION ALL }SELECT $t AS tier, '$r' AS root, name, data FROM fsdir('$d')"; done
 done <<EOF
 $roots
@@ -173,8 +175,9 @@ const obj = (value: unknown): Record<string, unknown> => asRecord(value) ?? {};
 const own = (record: Record<string, unknown>, name: string): unknown => Object.hasOwn(record, name) ? record[name] : undefined;
 const str = (value: unknown): string => typeof value === "string" ? value.trim() : "";
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-/** Drops `user:pass@` from URLs. */
-const bare = (text: string): string => text.replace(/\/\/[^/@\s]+@/g, "//");
+/** Drops `user:pass@` from URLs and masks credential-looking values: `token=`-style pairs and bearer tokens. */
+const bare = (text: string): string => text.replace(/\/\/[^/@\s]+@/g, "//")
+  .replace(/((?:key|token|secret|password|auth)\w*=)[^&\s]+/gi, "$1••••").replace(/(bearer\s+)\S+/gi, "$1••••");
 /** Every spelling `skills.disabled` may use for a skill: name, dir name, relative dir; plugin skills only by `ns:skill`. */
 const forms = (tier: number, name: string, rdir: string): string[] => tier === 4 ? [name] : [name, rdir.slice(rdir.lastIndexOf("/") + 1), rdir];
 
@@ -376,8 +379,8 @@ S body; cat "$f" 2>/dev/null; printf x
       const detail = this.cached(alias, id);
       if (!detail || !/^\d+ \d+$/.test(detail.cfgsum) || !/^(\d+ \d+|missing)$/.test(sum)) return { ok: false, message: CHANGED };
       const content = Buffer.from(next, "utf8");
-      // ponytail: the content rides in the ssh command (~256 KiB limit); sending it on stdin would lift this cap.
-      if (content.length > EDIT_CAP) return { ok: false, message: "Too large to edit here (> 128 KB)" };
+      // ponytail: the content rides twice base64-encoded in one ssh argument (Linux caps one at 128 KiB); stdin would lift this cap.
+      if (content.length > EDIT_CAP) return { ok: false, message: "Too large to edit here (> 64 KB)" };
       // The omh root comes from the cached Detail; the cfgsum check below keeps the host's config the one it was read from.
       const omh = detail.skills.find(skill => skill.source === "omh");
       const omhRoot = omh ? omh.path.slice(0, -(omh.rdir.length + 10)) : "";

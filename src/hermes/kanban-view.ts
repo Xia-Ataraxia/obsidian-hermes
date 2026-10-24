@@ -318,6 +318,7 @@ export class KanbanView extends HermesView {
     // old board: only the notice is left. Failed cards still move back: they are the client's cached objects, which the
     // next read of that board reuses while its token is unchanged.
     const same = this.key === key && this.read !== null, ok: string[] = [], errors: string[] = [];
+    let unsure = "";
     for (const v of verbs) {
       const o = typeof results === "string" ? { ok: false as const, message: results } : results[v.id] ?? { ok: false as const, message: "No result from the host" };
       if (o.ok) {
@@ -325,15 +326,18 @@ export class KanbanView extends HermesView {
         ok.push(v.id);
         continue;
       }
-      errors.push(`${v.id}: ${o.message}`);
       const c = cards.get(v.id), was = before.get(v.id);
       if (c && was) c.status = was;
+      // A batch that broke off may have run any of its verbs: no failed mark, the reload shows which did.
+      if ("unknown" in o) { unsure = o.message; continue; }
+      errors.push(`${v.id}: ${o.message}`);
       if (same) this.failed.add(v.id);
     }
     const failure = verbs.length === 1 ? `${to ? "Move" : "Action"} failed: ${errors[0]}`
       : `${to ? "Bulk move" : "Bulk action"}: ${errors.length} of ${verbs.length} failed\n${errors.slice(0, 3).join("\n")}`;
     if (errors.length && verbs.length === 1 && same) this.banner = failure;
     else if (errors.length) new Notice(failure, 10_000);
+    if (unsure) new Notice(`The batch did not finish (${unsure}). The reload shows what was applied.`, 10_000);
     if (!same) return null;
     if (to && ok.length) this.landing = { ids: ok, to };
     this.render();

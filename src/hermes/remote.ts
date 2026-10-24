@@ -23,7 +23,7 @@ arg() { printf %s "$1" | base64 -d; }
 ro() { q=$(cat); if [ -e "$1-wal" ] && printf '%s\\n' "$q" | sqlite3 -readonly "$1" 2>/dev/null; then :; else printf '%s\\n' "$q" | sqlite3 "file:$1?immutable=1"; fi; }
 `;
 
-const SAFE_TOKEN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+export const SAFE_TOKEN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 
 /** Profile ids, board slugs and task ids are interpolated only after this check. */
 export function safeToken(value: string): string {

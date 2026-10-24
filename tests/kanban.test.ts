@@ -146,7 +146,7 @@ test("bulk stops at a failed chunk and skips the rest", async () => {
   const result = await new KanbanClient(fakeSsh().adapter, slow.adapter).bulk("h", "zz-probe", archives(45));
   expect(slow.scripts).toHaveLength(2);
   expect([result.t_14, result.t_15, result.t_29, result.t_30, result.t_44]).toEqual([
-    { ok: false, message: "No confirmation from host" }, { ok: false, message: "timeout" }, { ok: false, message: "timeout" },
+    { ok: false, message: "No confirmation from host" }, { ok: false, unknown: true, message: "timeout" }, { ok: false, unknown: true, message: "timeout" },
     { ok: false, message: "Skipped: an earlier batch failed" }, { ok: false, message: "Skipped: an earlier batch failed" },
   ]);
 });

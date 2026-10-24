@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { HermesClient, parseProfiles, yamlField } from "../src/hermes/data";
 import { curve, snap, tidy } from "../src/hermes/geometry";
 import { parseSections } from "../src/hermes/remote";
@@ -91,4 +92,11 @@ test("model catalog parses and setModel writes provider then model via the CLI",
   expect(sent.length).toBe(count);
   const failed = { run: async () => ({ transport: "connected", exitCode: 0, stdout: "\u001eok\n\u001e?3\n", stderr: "warn\nno such model", capExceeded: false }) } as never;
   expect(await new HermesClient(failed).setModel("h", "xia", "m", "p")).toEqual({ ok: false, message: "no such model" });
+  // Run for real against a hermes whose model write fails: the old provider goes back, else it says so; exit 1 either way.
+  for (const [was, last] of [["openai", "Model not set; the old provider is back"], ["", "Model not set, but the provider changed (partially applied)"]] as const) {
+    await client.setModel("h", "xia", "m", "anthropic", was);
+    const run = spawnSync("sh", { input: `hermes() { printf '%s\\n' "$*" >&2; [ "$5" != model.default ]; }\n${sent.pop()!}`, encoding: "utf8" });
+    expect(run.stderr.trim().split("\n").slice(was ? -2 : -1)).toEqual(was ? ["-p xia config set model.provider openai", last] : [last]);
+    expect(run.stdout.endsWith("?1\n")).toBe(true);
+  }
 });

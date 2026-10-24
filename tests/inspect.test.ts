@@ -5,7 +5,7 @@ import type { PluginInfo, SkillInfo } from "../src/hermes/inspect";
 
 // bun shares one module registry across test files, so every "obsidian" mock declares the same names (see chat.test.ts).
 void mock.module("obsidian", () => ({ parseYaml: Bun.YAML.parse, MarkdownRenderer: { render: async () => {} } }));
-const { byLeastRecent, InspectClient, nextDisabled, parseDetail, pluginLastUsed } = await import("../src/hermes/inspect");
+const { byLeastRecent, EDIT_CAP, InspectClient, nextDisabled, parseDetail, pluginLastUsed } = await import("../src/hermes/inspect");
 
 const H = "/home/u/.hermes", P = `${H}/profiles/xia`, LOCAL = `${P}/skills`, OMH = "/home/u/.omh/profiles/xia/skills", SHARED = `${H}/skills-shared`;
 const CRAFT = `${P}/plugins/craft-skills`, MEMO = `${P}/plugins/memo`, DUSTY = `${P}/plugins/dusty`;
@@ -25,6 +25,8 @@ plugins:
       settings:
         api_key: sk-secret
         endpoint: https://user:pw@example.com/v1
+        hook: https://x.io/h?access_token=tq1&v=2
+        header: Bearer bq2
         nested: { auth_token: abc, depth: 3 }
 memory:
   provider: memo
@@ -98,9 +100,10 @@ test("parseDetail classifies sources, dedupes by tier, matches disabled spelling
     kind: "backend", version: "0.3", env: ["MEMO_KEY"], hooks: ["on_turn"],
     source: "https://github.com/a/memo.git @0123456 · pinned",
     readOnly: "Active via memory.provider; switch it in config.yaml",
-    settings: [["api_key", "••••"], ["endpoint", "https://example.com/v1"], ["nested.auth_token", "••••"], ["nested.depth", "3"]],
+    settings: [["api_key", "••••"], ["endpoint", "https://example.com/v1"], ["hook", "https://x.io/h?access_token=••••&v=2"], ["header", "Bearer ••••"],
+      ["nested.auth_token", "••••"], ["nested.depth", "3"]],
   });
-  expect(JSON.stringify(detail)).not.toMatch(/sk-secret|pw@|tok:x|abc/);
+  expect(JSON.stringify(detail)).not.toMatch(/sk-secret|pw@|tok:x|abc|tq1|bq2/);
   expect(detail).toMatchObject({ home: "/home/u", sksum: "123 45", platformDisabled: { telegram: ["local-one"] } });
 });
 
@@ -139,10 +142,11 @@ test("the client reads and saves only what the cached Detail lists, and enables 
   const sent: string[] = [];
   const last = (): string => sent[sent.length - 1]!;
   const detailOut = [...sections([["cfgsum", "678 90"]])].map(([name, body]) => `\u001e${name}\n${body}\n`).join("");
-  let printed = "";
+  let printed = "", arg = 0;
   const client = new InspectClient({ run: async (_alias: string, command: { remoteCommand: string }) => {
     const script = Buffer.from(command.remoteCommand.match(/printf %s (\S+)/)![1]!, "base64").toString();
     sent.push(script);
+    arg = command.remoteCommand.length;
     const stdout = script.includes("S cfgsum") ? detailOut : script.includes("S body") ? "\u001esum\n1 3\n\u001ebody\nhi\nx" : `\u001eok\n${printed}`;
     return { transport: "connected", exitCode: 0, stdout, stderr: "", capExceeded: false };
   } } as never);
@@ -163,6 +167,9 @@ test("the client reads and saves only what the cached Detail lists, and enables 
   expect(last()).toContain(`cksum)" = '678 90' ] || { echo "Changed on the server. Reload first." >&2; exit 3; }`);
   expect(last()).toContain("pwd -P");
   expect(await client.save("h", "xia", "SOUL.md", "1 3", "new")).toEqual({ ok: true });
+  // The largest editable file, base64-encoded twice, rides in one ssh argument: Linux caps one at 131072 bytes.
+  expect(await client.save("h", "xia", "SOUL.md", "1 3", "x".repeat(EDIT_CAP))).toEqual({ ok: true });
+  expect(arg).toBeLessThan(125_000);
 
   const craft = detail.plugins[0]!;
   printed = "✓ Plugin craft-skills enabled.\nNon-interactive session: capabilities NOT granted (fail closed). Run\n`hermes plugins capabilities craft-skills` to review.";

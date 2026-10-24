@@ -33,6 +33,7 @@ export const CONFIRM = {
   done: "Mark this task as done? The worker's claim is released and dependent children become ready.",
   archive: "Archive this task? It disappears from the default board view.",
   reclaim: "Reclaim this task? Its worker is stopped and the task returns to the queue.",
+  reassign: "Reassign this running task? Its worker is stopped and the task returns to the queue.",
   specify: "Specify this task? Hermes asks an LLM to flesh out the spec; it can take a minute.",
   decompose: "Decompose this task? Hermes asks an LLM to split it into child tasks; it can take a minute.",
 };
@@ -102,6 +103,7 @@ export interface Ask {
 export type Focus = "diagnostics" | "comment";
 
 class AskModal extends Modal {
+  private dismissed = false;
   constructor(app: App, private readonly ask: Ask) { super(app); }
 
   override onOpen(): void {
@@ -172,13 +174,15 @@ class AskModal extends Modal {
       void a.submit(v).catch(message).then(result => {
         busy = false;
         cta.disabled = false;
-        if (result === null) this.close(); else error.setText(result);
+        if (result === null) this.close(); else if (this.dismissed) new Notice(result, 10_000); else error.setText(result);
       });
     });
     ([...inputs.values()].find(el => el.tagName !== "SELECT") ?? cta).focus();
   }
 
   override onClose(): void {
+    // A write still in flight reports its failure in a Notice: the form is gone.
+    this.dismissed = true;
     this.contentEl.empty();
     this.ask.closed?.();
   }
@@ -324,7 +328,9 @@ export function diagCard(parent: HTMLElement, host: TaskHost, task: { id: string
     const label = `${a.suggested ? "☆ " : ""}${a.label}`, payload = (a.payload ?? {}) as Record<string, unknown>;
     switch (a.kind) {
       case "reclaim":
-        action(row, label, () => run({ verb: "reclaim", id, reason }, `Reclaimed ${id}. Task is back to ready.`, "Reclaim failed: "));
+        action(row, label, () => void confirmed(host.app, "Reclaim task", CONFIRM.reclaim, "Reclaim", true).then(ok => {
+          if (ok) run({ verb: "reclaim", id, reason }, `Reclaimed ${id}. Task is back to ready.`, "Reclaim failed: ");
+        }));
         break;
       case "unblock":
         action(row, label, () => run({ verb: "unblock", id, reason }, `Unblocked ${id}. Task is ready for the next tick.`, "Unblock failed: "));
@@ -337,7 +343,9 @@ export function diagCard(parent: HTMLElement, host: TaskHost, task: { id: string
           if (!select.value) { new Notice("Pick a profile first."); return; }
           const profile = select.value === "none" ? null : select.value;
           const verb = payload.reclaim_first === true || task.status === "running" ? "reassign" : "assign";
-          run({ verb, id, profile, reason }, `Reassigned ${id} to ${profile ?? "(unassigned)"}.`, "Reassign failed: ");
+          const go = (): void => run({ verb, id, profile, reason }, `Reassigned ${id} to ${profile ?? "(unassigned)"}.`, "Reassign failed: ");
+          if (verb === "assign") go();
+          else void confirmed(host.app, "Reassign task", CONFIRM.reassign, "Reassign", true).then(ok => { if (ok) go(); });
         });
         break;
       }
@@ -727,7 +735,7 @@ export class TaskDrawer {
       const profile = who.value || null, undo = (): void => { who.value = t.assignee ?? ""; };
       who.blur();
       if (t.status !== "running") { void this.write({ verb: "assign", id: this.id, profile }, undo); return; }
-      void confirmed(app, "Reassign task", "Reassign this running task? Its worker is stopped and the task returns to the queue.", "Reassign", true).then(ok => {
+      void confirmed(app, "Reassign task", CONFIRM.reassign, "Reassign", true).then(ok => {
         if (ok) void this.write({ verb: "reassign", id: this.id, profile, reason: "reassigned from Obsidian" }, undo); else undo();
       });
     });

@@ -7,6 +7,7 @@ import type { CronJob, Outcome, Profile } from "./data";
 import { byLeastRecent, EDIT_CAP, pluginLastUsed, type Detail, type PluginInfo, type SkillInfo, type Source, type ToolUse } from "./inspect";
 import { confirmed } from "./kanban-drawer";
 import { renderSafe } from "./markdown";
+import { SAFE_TOKEN } from "./remote";
 import { absolute, avatar, type HermesHost, icon, iconButton, relative, stat } from "./ui";
 
 type Pair = [model: string, provider: string];
@@ -287,7 +288,7 @@ export class ProfileModal extends Modal {
       const el = this.head.querySelector(".hm-stat.is-action");
       el?.addClass("is-spinning");
       try {
-        const outcome = await this.host.client.setModel(alias, profile.id, model, provider);
+        const outcome = await this.host.client.setModel(alias, profile.id, model, provider, profile.provider);
         if (!outcome.ok) return void new Notice(outcome.message);
         this.refresh();
       } catch (error) {
@@ -497,8 +498,6 @@ export class ProfileModal extends Modal {
       // Obsidian's keymap runs in the capture phase, so the modal's Escape (close) fires before any textarea listener.
       // A child scope on top takes Escape first: false stops it there; undefined during IME lets it reach the textarea.
       this.editScope = new Scope(this.scope);
-      // The modal's focus trap reads only the top scope's container (not in obsidian.d.ts); without it Tab leaves the modal.
-      (this.editScope as unknown as { setTabFocusContainerEl?(el: HTMLElement): void }).setTabFocusContainerEl?.(this.containerEl);
       this.editScope.register([], "Escape", event => { if (event.isComposing) return; cancel.click(); return false; });
       this.app.keymap.pushScope(this.editScope);
       area.focus();
@@ -516,7 +515,7 @@ export class ProfileModal extends Modal {
         return;
       }
       const lock = skill && (skill.source === "omh" || skill.source === "plugin") ? hint(skill)
-        : new TextEncoder().encode(file.text).length > EDIT_CAP ? "Too large to edit here (> 128 KB)" : null;
+        : new TextEncoder().encode(file.text).length > EDIT_CAP ? "Too large to edit here (> 64 KB)" : null;
       edit.disabled = lock !== null;
       if (lock) setTooltip(edit, lock);
       loaded = file;
@@ -685,7 +684,7 @@ export class ProfileModal extends Modal {
       const { alias, profileId } = this;
       void this.host.inspect.togglePlugin(alias, profileId, plugin, on).catch(fail).then(outcome => {
         if (!outcome.ok) new Notice(outcome.message);
-        else if ("ungranted" in outcome) new Notice(`${plugin.name} is on, but its capabilities stay off until granted. Grant them once in a terminal: hermes -p ${profileId} plugins enable ${plugin.key}`, 10_000);
+        else if ("ungranted" in outcome) new Notice(`${plugin.name} is on, but its capabilities stay off until granted. Grant them once in a terminal${SAFE_TOKEN.test(plugin.key) ? `: hermes -p ${profileId} plugins enable ${plugin.key}` : " with hermes plugins enable."}`, 10_000);
         if (!this.opened || alias !== this.alias || profileId !== this.profileId) return;
         if (!outcome.ok) this.overrides.delete(key);
         this.detail = this.host.inspect.cached(alias, profileId) ?? this.detail;
