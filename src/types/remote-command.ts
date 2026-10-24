@@ -48,7 +48,6 @@ export type TransportStatus =
   | "auth-failed"
   | "host-key-unknown"
   | "timeout"
-  | "config-conflict-remote-command"
   | "config-incompatible-shell"
   | "command-missing"
   | "proxy-failed";

@@ -24,7 +24,6 @@ export const TRANSPORT_LABEL: Record<TransportStatus, string> = {
   "auth-failed": "Authentication failed",
   "host-key-unknown": "Host key not verified",
   timeout: "Timed out",
-  "config-conflict-remote-command": "SSH config conflict (RemoteCommand)",
   "config-incompatible-shell": "Incompatible remote shell",
   "command-missing": "Remote command not found",
   "proxy-failed": "Proxy connection failed",

@@ -19,7 +19,6 @@ const TRANSPORT_DETAIL: Record<TransportStatus, string> = {
   "auth-failed": "Key authentication failed. Check your SSH agent and the remote authorized key.",
   "host-key-unknown": "Host key not verified. Connect once in a terminal to record it in known_hosts.",
   timeout: "Connection timed out. Check the network and the SSH alias.",
-  "config-conflict-remote-command": "Remove RemoteCommand from this SSH alias and try again.",
   "config-incompatible-shell": "The remote login shell is not compatible with safe read-only commands.",
   "command-missing": "A required command is missing on the remote host. Check the Hermes installation.",
   "proxy-failed": "SSH proxy connection failed. Check ProxyJump or ProxyCommand.",
@@ -59,7 +58,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
     disclosure(
       containerEl,
       "SSH requirements",
-      "Uses your existing ~/.ssh/config aliases with key authentication only; no password is stored. The host key must already be in known_hosts, and an alias that sets RemoteCommand cannot be used.",
+      "Uses your existing ~/.ssh/config aliases with key authentication only; no password is stored. The host key must already be in known_hosts.",
     );
     renderServerSection(containerEl, {
       servers: this.plugin.settings.servers,

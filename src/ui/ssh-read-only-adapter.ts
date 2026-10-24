@@ -21,6 +21,7 @@ const FIXED_OPTIONS: readonly string[] = [
   "-o", "ClearAllForwardings=yes",
   "-o", "PermitLocalCommand=no",
   "-o", "RequestTTY=no",
+  "-o", "RemoteCommand=none",
   "-T",
   "-n",
 ];
@@ -40,9 +41,6 @@ export function classifyTransport(exitCode: number | null, stderr: string): Tran
   // Anything other than ssh's own 255 (or a spawn failure) came from the remote program.
   if (exitCode !== null && exitCode !== 255) return "connected";
 
-  if (text.includes("cannot execute command-line and remote command")) {
-    return "config-conflict-remote-command";
-  }
   if (text.includes("host key verification failed") || text.includes("no matching host key")) {
     return "host-key-unknown";
   }
