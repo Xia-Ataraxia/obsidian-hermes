@@ -1,6 +1,6 @@
 /** Kanban over SSH: each read is one POSIX sh script (sqlite3 read-only through the PRELUDE `ro`), each write one `hermes kanban` verb. */
 import type { SshReadOnlyAdapter } from "../ui/ssh-read-only-adapter";
-import type { Outcome } from "./data";
+import { profileDir, type Outcome } from "./data";
 import { b64Arg, json, runScript, safeToken, type RemoteResult, type Sections } from "./remote";
 
 /* ───────────────────────── Types ───────────────────────── */
@@ -489,6 +489,29 @@ export class KanbanClient {
     if (v.verb === "rm") return this.kanban(alias, `boards rm -- ${slug}`, live(slug));
     const guard = v.verb === "create" ? `[ -e "$H/kanban/boards/${slug}" ] && { echo "Board '${slug}' already exists" >&2; exit 1; }\n` : live(slug);
     return this.kanban(alias, `boards create --name=${b64Arg(v.name)} --description=${b64Arg(v.description)} --icon=${b64Arg(v.icon)} --color=${b64Arg(v.color)} --default-workdir=${b64Arg(v.workdir)} -- ${slug}`, guard);
+  }
+
+  /* Orchestration (O1-O8): kanban.* sits in the config.yaml LIST reads, the default profile's, so it applies to every
+     board; `-p default` pins that file against a sticky active profile, and describe resolves names the same way. */
+
+  /** null runs `config unset`. Values are profile names or true/false, stored as they are; the caller checks names against the profile list. */
+  async setConfig(alias: string, key: "auto_decompose" | "orchestrator_profile" | "default_assignee", value: string | null): Promise<Outcome> {
+    // SLUG also keeps a leading "-" away from the CLI's flag parser (`--help` exits 0 without writing).
+    if (value !== null && !SLUG.test(value)) return { ok: false, message: `Unknown profile: ${value}` };
+    const args = value === null ? `unset kanban.${key}` : `set kanban.${key} ${b64Arg(value)}`;
+    return outcome(await runScript(this.adapter, alias, `hermes -p default config ${args} </dev/null >/dev/null && S ok`, 64 * 1024));
+  }
+
+  /** Each profile's profile.yaml in a section named after it, empty when missing: `profile list` prints no descriptions. */
+  async profileMeta(alias: string, names: readonly string[]): Promise<Sections | string> {
+    const result = await runScript(this.adapter, alias, `${names.map(p => `S ${safeToken(p)}; cat ${profileDir(p)}/profile.yaml 2>/dev/null`).join("\n")}\ntrue`);
+    return result.ok ? result.sections : result.message;
+  }
+
+  /** "" clears (the CLI reads an empty --text as "show", and strips " "); null auto-generates, a model call, on the slow adapter. */
+  async describe(alias: string, name: string, text: string | null): Promise<Outcome> {
+    const how = text === null ? "--auto --overwrite" : `--text=${b64Arg(text.trim() || " ")}`;
+    return outcome(await runScript(text === null ? this.slow : this.adapter, alias, `hermes -p default profile describe ${safeToken(name)} ${how} </dev/null >/dev/null && S ok`, 64 * 1024));
   }
 
   private async kanban(alias: string, args: string, guard = "", adapter = this.adapter): Promise<Outcome> {

@@ -1,6 +1,7 @@
 import { Menu, Notice, setIcon, setTooltip, SuggestModal, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { action, ask, askBlock, askComplete, COLUMNS, CONFIRM, confirmed, copy, diagCard, matches, message, openCreate, severityIcon, severityRank, suggestion, TaskDrawer, when, type Focus, type TaskHost } from "./kanban-drawer";
 import { keepBoard } from "./cache";
+import { OrchestrationModal } from "./kanban-orchestration";
 import { dropVerb, staleness, STATUSES, type Alert, type BoardMeta, type BoardRead, type Card, type Diagnostic, type Drop, type Status, type Verb } from "./kanban";
 import { avatar, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
 
@@ -101,7 +102,7 @@ export class KanbanView extends HermesView {
   private force = false;
   private landing: { ids: string[]; to: Status } | null = null;
   private switcher!: HTMLButtonElement;
-  private pill!: HTMLElement;
+  private pill!: HTMLButtonElement;
   private searchInput!: HTMLInputElement;
   private tenantSelect!: HTMLSelectElement;
   private profileSelect!: HTMLSelectElement;
@@ -429,11 +430,38 @@ export class KanbanView extends HermesView {
     void this.reload();
   }
 
+  /** The pill flips kanban.auto_decompose, which every board shares, like the web's. */
+  private async toggleAuto(): Promise<void> {
+    const r = this.read, alias = this.alias;
+    if (!r || this.pill.disabled) return;
+    const next = String(!on(r.config.auto_decompose));
+    this.pill.disabled = true;
+    const o = await this.host.kanban.setConfig(alias, "auto_decompose", next).catch((e: unknown) => ({ ok: false as const, message: message(e) }));
+    this.pill.disabled = false;
+    if (!o.ok) {
+      new Notice(`Save failed: ${o.message}`, 10_000);
+      return;
+    }
+    r.config.auto_decompose = next;
+    if (this.read === r) this.syncTools(r);
+    void this.reload();
+  }
+
+  private openOrchestration(): void {
+    const alias = this.alias;
+    new OrchestrationModal({
+      app: this.app, kanban: this.host.kanban, alias, read: () => this.read, reload: () => this.reload(),
+      moved: () => this.closed ? "The board view is closed." : this.alias === alias ? null : MOVED,
+    }).open();
+  }
+
   private buildTools(): void {
     this.switcher = this.tools.createEl("button", { cls: "hm-k-switch", attr: { type: "button", "aria-label": "Switch board" } });
     setTooltip(this.switcher, "Switch board");
     this.switcher.addEventListener("click", () => this.openSwitcher());
-    this.pill = this.tools.createSpan("hm-k-pill");
+    this.pill = this.tools.createEl("button", { cls: "hm-k-pill", attr: { type: "button" } });
+    this.pill.addEventListener("click", () => void this.toggleAuto());
+    iconButton(this.tools, "settings", "Orchestration settings", () => this.openOrchestration());
     const search = this.tools.createDiv("hm-search");
     icon(search, "search");
     this.searchInput = search.createEl("input", { attr: { type: "search", placeholder: "Filter cards…", "aria-label": "Filter cards" } });
@@ -483,7 +511,7 @@ export class KanbanView extends HermesView {
     const auto = on(r.config.auto_decompose);
     this.pill.setText(auto ? "Auto" : "Manual");
     this.pill.toggleClass("is-on", auto);
-    setTooltip(this.pill, `${auto ? AUTO : MANUAL}\nOrchestrator: ${r.config.orchestrator_profile || "—"}\nDefault assignee: ${r.config.default_assignee || "—"}`);
+    setTooltip(this.pill, `${auto ? AUTO : MANUAL} Click to switch to ${auto ? "manual" : "auto"}.\nOrchestrator: ${r.config.orchestrator_profile || "—"}\nDefault assignee: ${r.config.default_assignee || "—"}`);
     const tenants = [...new Set(r.tasks.flatMap(c => c.tenant ? [c.tenant] : []))].sort();
     this.tenant = fill(this.tenantSelect, "All tenants", tenants.map((t): [string, string] => [t, t]), this.tenant);
     this.tenantSelect.toggle(tenants.length > 0);

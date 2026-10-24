@@ -247,6 +247,7 @@ await mock.module("obsidian", () => ({
   Component: class {},
   AbstractInputSuggest: class {},
   Menu: class {},
+  Setting: class {},
   SuggestModal: class {},
   Notice: class { constructor(text: string) { notices.push(text); } },
   setIcon: () => undefined,
