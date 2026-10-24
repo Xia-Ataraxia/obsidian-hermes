@@ -1,8 +1,8 @@
 import { Menu, Notice, setIcon, setTooltip, SuggestModal, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
-import { action, ask, askBlock, askComplete, COLUMNS, CONFIRM, confirmed, copy, diagCard, matches, message, openCreate, severityIcon, severityRank, suggestion, TaskDrawer, when, type Focus, type TaskHost } from "./kanban-drawer";
+import { action, ask, askBlock, askComplete, askReassign, COLUMNS, CONFIRM, confirmed, copy, deleteText, diagCard, matches, message, openCreate, severityIcon, severityRank, suggestion, TaskDrawer, when, type Focus, type TaskHost } from "./kanban-drawer";
 import { keepBoard } from "./cache";
 import { OrchestrationModal } from "./kanban-orchestration";
-import { dropVerb, staleness, STATUSES, type Alert, type BoardMeta, type BoardRead, type Card, type Diagnostic, type Drop, type Status, type Verb } from "./kanban";
+import { dropVerb, refusal, staleness, STATUSES, type Alert, type BoardMeta, type BoardRead, type Card, type Diagnostic, type Drop, type Status, type Verb } from "./kanban";
 import { avatar, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
 
 export const KANBAN_VIEW = "hermes-kanban";
@@ -59,6 +59,12 @@ const MANUAL = "Orchestration: Manual — triage tasks stay in triage until you 
 const NEEDS = "Dependencies are satisfied, but the dispatcher skips this task until you assign a profile.";
 const CAPPED = new Set<Status>(["done", "archived"]);
 const plural = (n: number): string => n === 1 ? "" : "s";
+/** Delete for good: the CLI purges only archived tasks, so each task on the board not archived yet gets an archive verb ahead of
+ *  its purge (an id the read lacks is archived, or gone, and gets the purge alone). One bulk round trip runs the pairs in order. */
+const deletion = (ids: string[], tasks: Card[]): Verb[] => {
+  const open = new Set(tasks.filter(c => c.status !== "archived").map(c => c.id));
+  return ids.flatMap((id): Verb[] => [...(open.has(id) ? [{ verb: "archive", id } as const] : []), { verb: "purge", id }]);
+};
 const on = (v?: string): boolean => !/^(false|no|off|0)$/i.test(v ?? "");
 /** What a dialog left open across a host change gets back: the board and task ids it holds belong to the old host. */
 const MOVED = "The SSH host changed; open it again.";
@@ -184,8 +190,8 @@ export class KanbanView extends HermesView {
   override async onOpen(): Promise<void> {
     await super.onOpen();
     this.contentEl.addClass("hm-k-view");
-    // ponytail: D29, the board token (live mode reads it every second) misses heartbeat and claim changes; they wait for the next
-    // event or a forced read (open, board switch, window focus, Refresh, a write).
+    // ponytail: D29, the board token moves on every task event (heartbeat and claim included), not on a write that appends none
+    // (workspace path, branch); that waits for the next event or a forced read (open, board switch, window focus, Refresh, a write).
     this.registerDomEvent(this.contentEl.win, "focus", () => {
       if (!this.contentEl.isShown() || this.busy()) return;
       this.force = true;
@@ -205,12 +211,13 @@ export class KanbanView extends HermesView {
     this.registerInterval(window.setInterval(() => {
       for (const el of Array.from(this.contentEl.querySelectorAll<HTMLElement>("[data-at]"))) el.setText(relative(Number(el.dataset.at)));
     }, 60_000));
-    // ponytail: live mode asks once a second, one sqlite3 run on the host each time; the web dashboard tails task_events every 0.3 s.
-    this.registerInterval(window.setInterval(() => this.pulse(), 1_000));
+    // ponytail: live mode asks every 0.3 s like the web dashboard's task_events tail, one sqlite3 run on the host per answer and
+    // never two asks at once (a slow host just answers less often); lengthen this if hosts feel the load.
+    this.registerInterval(window.setInterval(() => this.pulse(), 300));
     this.register(() => this.stopLive());
   }
 
-  /** Each second, one live session per shown board. While it answers, poll ticks skip their probe; once it is down they take
+  /** Every 0.3 s, one live session per shown board. While it answers, poll ticks skip their probe; once it is down they take
    *  over again, and live mode retries a minute after its last start. */
   private pulse(): void {
     const slug = this.alias && this.host.board(this.alias), key = `${this.alias}|${slug}`;
@@ -227,12 +234,14 @@ export class KanbanView extends HermesView {
   }
 
   private stopLive(): void {
+    window.clearTimeout(this.liveTimer);
     this.live?.stop();
     this.live = null;
   }
 
-  /** A live answer differs from the cached read's token: one forced read after 250 ms of quiet. Mid-read it does nothing, since
-   *  the next tick compares against what that read cached, so a change the read missed still gets its single follow-up. */
+  /** A live answer differs from the cached read's token: one forced read 250 ms later (the dashboard's delay, shorter than the
+   *  300 ms tick, so each tick's change gets its own read). Mid-read it does nothing, since the next tick compares against what
+   *  that read cached, so a change the read missed still gets its single follow-up: one board read at a time, never a queue. */
   private moved(): void {
     window.clearTimeout(this.liveTimer);
     if (this.inflight) return;
@@ -336,13 +345,31 @@ export class KanbanView extends HermesView {
     if (!this.busy()) this.render();
   }
 
-  private async write(v: Verb): Promise<string | null> {
-    const r = await this.host.kanban.run(this.alias, this.read?.board ?? this.host.board(this.alias), v)
+  /** The read on screen when it is `board` of `alias`, else null: what an action begun there may patch once it answers. */
+  private current(alias: string, board: string): BoardRead | null {
+    return !this.closed && this.alias === alias && this.read?.board === board ? this.read : null;
+  }
+
+  /** `slug` is the board the drawer was opened on: a write goes there even when the view has moved on, and then only reloads. */
+  private async write(v: Verb, slug: string): Promise<string | null> {
+    const { alias } = this;
+    const r = await this.host.kanban.run(alias, slug, v)
       .catch((e: unknown) => ({ ok: false as const, message: message(e) }));
     if (!r.ok) return r.message;
-    this.dirty = v.id;
+    if (this.current(alias, slug)) this.dirty = v.id;
     void this.reload();
     return null;
+  }
+
+  /** The drawer's Delete: the task's archive and purge in one round trip; resolves to the CLI's error, if any. */
+  private async remove(id: string, slug: string): Promise<string | null> {
+    // A view that has left `slug` has no statuses for it: the purge then goes alone, and the CLI refuses it unless the task is archived.
+    const tasks = this.current(this.alias, slug)?.tasks ?? [];
+    const results = await this.host.kanban.bulk(this.alias, slug, deletion([id], tasks)).catch((e: unknown) => message(e));
+    const o = typeof results === "string" ? { ok: false as const, message: results } : results[id];
+    // Whatever the outcome (a card archived but not purged), the board changed: reload.
+    void this.reload();
+    return o?.ok ? null : o?.message ?? "No result from the host";
   }
 
   // Not `open`: Obsidian mounts a view through View.open(containerEl), and shadowing it leaves the tab blank.
@@ -365,19 +392,22 @@ export class KanbanView extends HermesView {
   }
 
   private taskHost(): TaskHost {
-    const { alias } = this;
+    const { alias } = this, slug = this.read?.board ?? this.host.board(alias);
     const moved = (): string | null => this.closed ? "The board view is closed." : this.alias === alias ? null : MOVED;
-    return {
-      app: this.app, owner: this, alias, slug: this.read?.board ?? this.host.board(alias),
+    const h: TaskHost = {
+      app: this.app, owner: this, alias, slug,
       kanban: this.host.kanban, client: this.host.client,
-      cards: () => this.read?.tasks ?? [],
+      cards: () => this.current(alias, slug)?.tasks ?? [],
       profiles: () => this.read?.profiles ?? [],
       diagnostics: id => this.diags[id] ?? [],
-      write: v => { const why = moved(); return why === null ? this.write(v) : Promise.resolve(why); },
+      write: v => { const why = moved(); return why === null ? this.write(v, slug) : Promise.resolve(why); },
+      remove: id => { const why = moved(); return why === null ? this.remove(id, slug) : Promise.resolve(why); },
       moved,
       open: (id, focus) => this.openTask(id, focus),
-      close: () => { this.closeDrawer(); this.render(); },
+      // Only the drawer this host opened: a Delete that ends after another card was opened, or after the view left the board, must not close the one shown now.
+      close: () => { if (this.drawer?.host === h) { this.closeDrawer(); this.render(); } },
     };
+    return h;
   }
 
   private meta(): BoardMeta | undefined { return this.read?.boards.find(b => b.slug === this.read?.board); }
@@ -390,49 +420,54 @@ export class KanbanView extends HermesView {
 
   /**
    * Runs verbs in one round trip. With `to`, the cards move first and a failed one moves back.
-   * `alias` is the host the dialog behind this call was opened on: once the host changed, the ids and the board belong to
-   * the old one, so the answer is MOVED and nothing is sent. Forms show it; the confirm-only callers drop it, like the picker's.
+   * `alias` and `board` are the host and board the dialog behind this call was opened on. Once the host changed, the ids and
+   * the board belong to the old one, so the answer is MOVED and nothing is sent. A switch to another board of the same host
+   * still sends to `board` (the user asked for that board); the board on screen is then only reloaded, never patched.
+   * Forms show the answer; the confirm-only callers drop it, like the picker's.
    */
-  private async apply(alias: string, verbs: Verb[], to?: Status): Promise<string | null> {
+  private async apply(alias: string, board: string, verbs: Verb[], to?: Status): Promise<string | null> {
     if (alias !== this.alias) return MOVED;
-    const r = this.read;
-    if (!r || !verbs.length) return null;
-    const cards = new Map(r.tasks.map((c): [string, Card] => [c.id, c]));
+    if (!verbs.length) return null;
+    const r = this.current(alias, board);
+    const cards = new Map((r?.tasks ?? []).map((c): [string, Card] => [c.id, c]));
     const before = new Map(verbs.map((v): [string, Status | undefined] => [v.id, cards.get(v.id)?.status]));
     if (to) for (const v of verbs) {
       const c = cards.get(v.id);
       if (c) c.status = to;
     }
-    this.render();
-    const key = this.key;
-    const results = await this.host.kanban.bulk(alias, r.board, verbs).catch((e: unknown) => message(e));
+    if (r) this.render();
+    const results = await this.host.kanban.bulk(alias, board, verbs).catch((e: unknown) => message(e));
     // After a board or server switch (switchBoard() empties `read` at once) or a close, the marks, banner and landing
     // belong to the old board: only the notice is left. Failed cards still move back: they are the client's cached
     // objects, which the next read of that board reuses while its token is unchanged.
-    const same = !this.closed && this.key === key && this.read !== null, ok: string[] = [], errors: string[] = [];
+    const same = this.current(alias, board) !== null, ok: string[] = [], errors: string[] = [];
     let unsure = "";
-    for (const v of verbs) {
-      const o = typeof results === "string" ? { ok: false as const, message: results } : results[v.id] ?? { ok: false as const, message: "No result from the host" };
+    // A delete sends two verbs for one task (its archive and its purge): the answers, marks and counts go by task.
+    const ids = [...new Set(verbs.map(v => v.id))];
+    for (const id of ids) {
+      const o = typeof results === "string" ? { ok: false as const, message: results } : results[id] ?? { ok: false as const, message: "No result from the host" };
       if (o.ok) {
-        if (same) this.failed.delete(v.id);
-        ok.push(v.id);
+        if (same) this.failed.delete(id);
+        ok.push(id);
         continue;
       }
-      const c = cards.get(v.id), was = before.get(v.id);
+      const c = cards.get(id), was = before.get(id);
       if (c && was) c.status = was;
       // A batch that broke off may have run any of its verbs: no failed mark, the reload shows which did.
       if ("unknown" in o) { unsure = o.message; continue; }
-      errors.push(`${v.id}: ${o.message}`);
-      if (same) this.failed.add(v.id);
+      errors.push(`${id}: ${o.message}`);
+      if (same) this.failed.add(id);
     }
-    const failure = verbs.length === 1 ? `${to ? "Move" : "Action"} failed: ${errors[0]}`
-      : `${to ? "Bulk move" : "Bulk action"}: ${errors.length} of ${verbs.length} failed\n${errors.slice(0, 3).join("\n")}`;
-    if (errors.length && verbs.length === 1 && same) this.banner = failure;
+    const failure = ids.length === 1 ? `${to ? "Move" : "Action"} failed: ${errors[0]}`
+      : `${to ? "Bulk move" : "Bulk action"}: ${errors.length} of ${ids.length} failed\n${errors.slice(0, 3).join("\n")}`;
+    if (errors.length && ids.length === 1 && same) this.banner = failure;
     else if (errors.length) new Notice(failure, 10_000);
     if (unsure) new Notice(`The batch did not finish (${unsure}). The reload shows what was applied.`, 10_000);
-    if (!same) return null;
-    if (to && ok.length) this.landing = { ids: ok, to };
-    this.render();
+    if (same) {
+      if (to && ok.length) this.landing = { ids: ok, to };
+      this.render();
+    }
+    // Also when the view left `board`: the board on screen may have changed under the same host, and a reload is cheap.
     void this.reload();
     return null;
   }
@@ -440,12 +475,12 @@ export class KanbanView extends HermesView {
   private async drop(ids: string[], to: Status): Promise<void> {
     const r = this.read, alias = this.alias;
     if (!r) return;
-    const label = COLUMNS[to].label;
+    const board = r.board, label = COLUMNS[to].label;
     const go: [Card, Drop][] = [];
     for (const c of r.tasks.filter(t => ids.includes(t.id))) {
-      const d = dropVerb(c.status, to);
+      const d = dropVerb(c.status, to, c.openParents);
       if (d === "refuse") {
-        new Notice(`No command moves a task into ${label}.`);
+        new Notice(`${ids.length > 1 ? `${c.id}: ` : ""}${refusal(c.status, to, c.openParents)}`);
         return;
       }
       if (d) go.push([c, d]);
@@ -455,21 +490,27 @@ export class KanbanView extends HermesView {
       return;
     }
     const cards = go.map(([c]) => c);
-    if (to === "blocked") return askBlock(this.app, cards, (kind, reason) => this.apply(alias, cards.map((c): Verb => ({ verb: "block", id: c.id, kind, reason })), to));
-    if (to === "done") return askComplete(this.app, cards.length, (summary, result) => this.apply(alias, cards.map((c): Verb => ({
+    if (to === "blocked") return askBlock(this.app, cards, (kind, reason) => this.apply(alias, board, cards.map((c): Verb => ({ verb: "block", id: c.id, kind, reason })), to));
+    if (to === "done") return askComplete(this.app, cards.length, (summary, result) => this.apply(alias, board, cards.map((c): Verb => ({
       verb: "complete", id: c.id, ...(summary ? { summary } : {}), ...(result ? { result } : {}), ...(c.status === "running" ? { force: true } : {}),
     })), to));
     if (to === "archived" && !await confirmed(this.app, "Archive", cards.length === 1 ? CONFIRM.archive : `Archive ${cards.length} tasks?`, "Archive", true)) return;
     if (go.some(([, d]) => d === "reclaim") && !await confirmed(this.app, "Reclaim", CONFIRM.reclaim, "Reclaim", true)) return;
-    await this.apply(alias, go.map(([c, d]): Verb => d === "reclaim" ? { verb: d, id: c.id, reason: "reclaimed from Obsidian" } : { verb: d, id: c.id } as Verb), to);
+    // "block" gets here only for a drop onto To-do (a drop onto Blocked asked above): a dependency block, which has no reason to ask for.
+    await this.apply(alias, board, go.map(([c, d]): Verb => d === "reclaim" ? { verb: d, id: c.id, reason: "reclaimed from Obsidian" }
+      : d === "block" ? { verb: d, id: c.id, kind: "dependency", reason: "moved to To-do from Obsidian" } : { verb: d, id: c.id } as Verb), to);
   }
 
-  private async assign(cards: Card[], profile: string | null): Promise<void> {
+  /** A running card needs `reassign`; the CLI refuses it while its worker holds it, unless `--reclaim` stops the worker first, so
+   *  the form asks (unchecked) and a refusal shows per card like any other failure. Without a running card there is nothing to ask.
+   *  `board` is the one the cards were picked on. */
+  private async assign(cards: Card[], profile: string | null, board: string): Promise<void> {
     const alias = this.alias;
-    if (cards.some(c => c.status === "running") && !await confirmed(this.app, "Reassign", CONFIRM.reclaim, "Reassign", true)) return;
-    await this.apply(alias, cards.map((c): Verb => c.status === "running"
-      ? { verb: "reassign", id: c.id, profile, reason: "reassigned from Obsidian" }
+    const send = (reclaim: boolean): Promise<string | null> => this.apply(alias, board, cards.map((c): Verb => c.status === "running"
+      ? { verb: "reassign", id: c.id, profile, reason: "reassigned from Obsidian", ...(reclaim ? { reclaim } : {}) }
       : { verb: "assign", id: c.id, profile }));
+    if (cards.some(c => c.status === "running")) askReassign(this.app, send);
+    else await send(false);
   }
 
   private async nudge(): Promise<void> {
@@ -582,7 +623,7 @@ export class KanbanView extends HermesView {
     if (this.searchInput.value !== this.search) this.searchInput.value = this.search;
   }
 
-  /** Board switcher with per-board counts, plus New board, Board settings and Archive this board. */
+  /** Board switcher with per-board counts, plus New board, Board settings and Remove this board. */
   private openSwitcher(): void {
     const r = this.read;
     if (!r) return;
@@ -590,7 +631,7 @@ export class KanbanView extends HermesView {
     const items: Item[] = [...r.boards.filter(b => !b.archived).map((meta): Item => ({ kind: "board", meta })), { kind: "new" }, { kind: "settings" }];
     if (r.board !== "default") items.push({ kind: "archive" });
     const label = (i: Item): string => i.kind === "board" ? i.meta.name || i.meta.slug
-      : i.kind === "new" ? "New board…" : i.kind === "settings" ? "Board settings…" : "Archive this board…";
+      : i.kind === "new" ? "New board…" : i.kind === "settings" ? "Board settings…" : "Remove this board…";
     const draw = (i: Item, el: HTMLElement): void => {
       if (i.kind !== "board") return suggestion(el, label(i));
       const total = STATUSES.reduce((n, s) => s === "archived" ? n : n + (i.meta.counts[s] ?? 0), 0);
@@ -606,11 +647,26 @@ export class KanbanView extends HermesView {
       }
       const meta = this.meta();
       if (i.kind === "archive") {
-        void confirmed(this.app, "Archive board", `Archive board '${meta?.name || r.board}'? Its tasks are kept on the host.`, "Archive", true).then(async yes => {
-          if (!yes || alias !== this.alias) return;
-          const o = await this.host.kanban.boards(this.alias, { verb: "rm", slug: r.board }).catch((e: unknown) => ({ ok: false as const, message: message(e) }));
-          if (!o.ok) new Notice(o.message, 10_000);
-          else this.switchBoard("default");
+        const name = meta?.name || r.board;
+        // Ticking "Delete it instead" turns the text and the button into what the click will do: a deletion, with no way back.
+        ask(this.app, {
+          title: "Remove board",
+          cta: v => v.delete ? "Delete permanently" : "Remove",
+          warning: true,
+          text: v => v.delete ? `Delete board '${name}' and all its tasks from the host? This can't be undone.`
+            : `Remove board '${name}'? It is archived and its tasks are kept on the host.`,
+          fields: [{ key: "delete", label: "Delete it instead", kind: "checkbox", desc: "Removes the board's folder and all its tasks from the host. This can't be undone." }],
+          submit: async v => {
+            if (alias !== this.alias) return MOVED;
+            const o = await this.host.kanban.boards(this.alias, { verb: "rm", slug: r.board, ...(v.delete ? { delete: true } : {}) })
+              .catch((e: unknown) => ({ ok: false as const, message: message(e) }));
+            if (!o.ok) return o.message;
+            // Host still on the removed board: back to default (this view follows if it shows that host). Else a view of that host reloads, so the switcher drops the board.
+            if (this.host.board(alias) === r.board) {
+              if (this.alias === alias) this.switchBoard("default"); else this.host.saveBoard(alias, "default");
+            } else if (this.alias === alias) void this.reload();
+            return null;
+          },
         });
         return;
       }
@@ -806,8 +862,8 @@ export class KanbanView extends HermesView {
   }
 
   private bulkBar(r: BoardRead, visible: Card[]): void {
-    // The dialogs opened from this bar hold its cards: they are applied to the host the bar was drawn for, or not at all.
-    const alias = this.alias;
+    // The dialogs opened from this bar hold its cards: they go to the board the bar was drawn for, or, once the host changed, nowhere.
+    const alias = this.alias, board = r.board;
     const cards = r.tasks.filter(c => this.selected.has(c.id));
     const ids = cards.map(c => c.id);
     const n = cards.length;
@@ -822,7 +878,7 @@ export class KanbanView extends HermesView {
         return;
       }
       void confirmed(this.app, "Unblock", `Unblock ${stuck.length} task${plural(stuck.length)}?`, "Unblock").then(yes => {
-        if (yes) void this.apply(alias, stuck.map((c): Verb => ({ verb: "unblock", id: c.id })), "ready");
+        if (yes) void this.apply(alias, board, stuck.map((c): Verb => ({ verb: "unblock", id: c.id })), "ready");
       });
     }, "lock-open", "Unblock the selected blocked or scheduled tasks");
     action(bar, "Complete…", () => void this.drop(ids, "done"), COLUMNS.done.icon, "Mark the selected tasks done");
@@ -834,7 +890,7 @@ export class KanbanView extends HermesView {
       submit: async v => {
         const priority = Number(v.priority);
         if (!Number.isInteger(priority)) return "Priority must be a whole number";
-        return this.apply(alias, cards.map((c): Verb => ({ verb: "edit", id: c.id, priority })));
+        return this.apply(alias, board, cards.map((c): Verb => ({ verb: "edit", id: c.id, priority })));
       },
     }), "arrow-up-down", "Set the priority of the selected tasks");
     const assign = bar.createEl("select", { cls: "dropdown hm-k-select" });
@@ -846,13 +902,14 @@ export class KanbanView extends HermesView {
       const value = assign.value;
       assign.value = "";
       assign.blur();
-      if (value) void this.assign(cards, value === " none" ? null : value);
+      if (value) void this.assign(cards, value === " none" ? null : value, board);
     });
-    if (cards.every(c => c.status === "archived")) action(bar, "Delete permanently", () => {
-      void confirmed(this.app, "Delete permanently", `Delete ${n} archived task${plural(n)} permanently? This can't be undone.`, "Delete", true).then(yes => {
-        if (yes) void this.apply(alias, cards.map((c): Verb => ({ verb: "purge", id: c.id })));
+    action(bar, "Delete permanently", () => {
+      const running = cards.filter(c => c.status === "running").length;
+      void confirmed(this.app, "Delete permanently", deleteText(n, running), "Delete", true).then(yes => {
+        if (yes) void this.apply(alias, board, deletion(ids, this.current(alias, board)?.tasks ?? r.tasks));
       });
-    }, "trash-2").addClass("mod-warning");
+    }, "trash-2", "Delete the selected tasks permanently").addClass("mod-warning");
     action(bar, "Select all", () => {
       this.selected.clear();
       for (const c of visible) this.selected.add(c.id);
@@ -996,7 +1053,7 @@ export class KanbanView extends HermesView {
     for (const col of Array.from(this.body.querySelectorAll<HTMLElement>(".hm-k-col"))) {
       const to = col.dataset.status as Status;
       if (cards.every(c => c.status === to)) continue;
-      const verbs = cards.map(c => dropVerb(c.status, to));
+      const verbs = cards.map(c => dropVerb(c.status, to, c.openParents));
       if (verbs.every(v => v === null)) {
         col.addClass("is-locked");
         continue;
@@ -1017,7 +1074,7 @@ export class KanbanView extends HermesView {
     }));
     menu.addSeparator();
     for (const to of STATUSES) {
-      const verb = dropVerb(c.status, to);
+      const verb = dropVerb(c.status, to, c.openParents);
       if (verb === null || verb === "refuse") continue;
       menu.addItem(i => i.setTitle(to === "archived" ? "Archive" : `Move to ${COLUMNS[to].label}`).setIcon(COLUMNS[to].icon)
         .setWarning(to === "archived").onClick(() => void this.drop([c.id], to)));

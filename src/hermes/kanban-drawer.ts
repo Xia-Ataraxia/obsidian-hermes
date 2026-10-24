@@ -33,10 +33,13 @@ export const CONFIRM = {
   done: "Mark this task as done? The worker's claim is released and dependent children become ready.",
   archive: "Archive this task? It disappears from the default board view.",
   reclaim: "Reclaim this task? Its worker is stopped and the task returns to the queue.",
-  reassign: "Reassign this running task? Its worker is stopped and the task returns to the queue.",
   specify: "Specify this task? Hermes asks an LLM to flesh out the spec; it can take a minute.",
   decompose: "Decompose this task? Hermes asks an LLM to split it into child tasks; it can take a minute.",
 };
+
+/** The Delete confirm: the count, that it can't be undone, and that a running task's worker is stopped first (the archive step does that). */
+export const deleteText = (n: number, running: number): string =>
+  `Delete ${n === 1 ? "this task" : `${n} tasks`} permanently? This can't be undone.${running ? ` ${running === 1 ? "A running worker is" : `${running} running workers are`} stopped first.` : ""}`;
 
 export function copy(text: string, what = text): void {
   void navigator.clipboard.writeText(text).then(() => new Notice(`Copied ${what}`), () => new Notice(text));
@@ -86,15 +89,19 @@ export class Suggest<T> extends AbstractInputSuggest<T> {
 export interface Suggestion { value: string; label: string; note?: string; fill?: Record<string, string> }
 
 export interface Field {
-  key: string; label: string; kind?: "text" | "textarea" | "dropdown" | "number"; value?: string; options?: [string, string][];
+  /** A checkbox reads "on" when ticked, else "" (and starts ticked when `value` is "on"). */
+  key: string; label: string; kind?: "text" | "textarea" | "dropdown" | "number" | "checkbox"; value?: string; options?: [string, string][];
   placeholder?: string; required?: boolean; desc?: string;
   /** Enter submits (Shift+Enter keeps a newline). */
   enter?: boolean;
   suggest?: (query: string, values: Record<string, string>) => Suggestion[] | Promise<Suggestion[]>;
 }
 
+/** Dialog copy: fixed, or drawn from the form's values as they change. */
+type Say = string | ((values: Record<string, string>) => string);
+
 export interface Ask {
-  title: string; text?: string; fields?: Field[]; cta?: string; warning?: boolean;
+  title: string; text?: Say; fields?: Field[]; cta?: Say; warning?: boolean;
   /** Copy `map(from)` into `to` until the user edits `to`. */
   follow?: { from: string; to: string; map: (v: string) => string };
   hint?: (values: Record<string, string>) => string;
@@ -105,25 +112,41 @@ export interface Ask {
 
 export type Focus = "diagnostics" | "comment";
 
+type Control = HTMLElement & { value: string; type?: string; checked?: boolean };
+
 class AskModal extends Modal {
   private dismissed = false;
+  /** Set by onOpen: puts a new field's row in the open form, ahead of the row of the field named. */
+  private insert: ((f: Field, before: string) => void) | null = null;
   constructor(app: App, private readonly ask: Ask) { super(app); }
 
+  /** Adds a field to the form while it is open, ahead of the one named `before`; a dialog that has closed takes nothing. */
+  addField(f: Field, before: string): void {
+    if (this.dismissed) return;
+    const fields = this.ask.fields ??= [], at = fields.findIndex(x => x.key === before);
+    fields.splice(at < 0 ? fields.length : at, 0, f);
+    this.insert?.(f, before);
+  }
+
   override onOpen(): void {
-    const a = this.ask, fields = a.fields ?? [];
+    const a = this.ask, fields = a.fields ??= [];
     this.modalEl.addClass("hm-modal");
     this.setTitle(a.title);
     const form = this.contentEl.createEl("form", { cls: fields.length > 4 ? "hm-form is-grid" : "hm-form" });
-    if (a.text) form.createEl("p", { cls: "hm-k-ask-text", text: a.text });
-    const inputs = new Map<string, HTMLElement & { value: string }>();
-    const values = (): Record<string, string> => Object.fromEntries([...inputs].map(([key, el]) => [key, el.value.trim()]));
-    for (const f of fields) {
-      const label = form.createEl("label", { cls: f.kind === "textarea" ? "hm-k-field is-wide" : "hm-k-field" });
+    const lead = a.text ? form.createEl("p", { cls: "hm-k-ask-text" }) : null;
+    const inputs = new Map<string, Control>();
+    const values = (): Record<string, string> => Object.fromEntries([...inputs].map(([key, el]) => [key, el.type === "checkbox" ? (el.checked ? "on" : "") : el.value.trim()]));
+    const say = (s: Say | undefined): string => typeof s === "function" ? s(values()) : s ?? "";
+    const build = (f: Field): HTMLElement => {
+      const label = form.createEl("label", { cls: f.kind === "textarea" ? "hm-k-field is-wide" : f.kind === "checkbox" ? "hm-k-field is-check" : "hm-k-field" });
       label.createSpan({ cls: "hm-k-field-label", text: f.label });
       const placeholder = f.placeholder ? { placeholder: f.placeholder } : {};
-      let input: HTMLElement & { value: string };
+      let input: Control;
       if (f.kind === "textarea") input = label.createEl("textarea", { attr: { rows: 3, ...placeholder } });
-      else if (f.kind === "dropdown") {
+      else if (f.kind === "checkbox") {
+        input = label.createEl("input", { type: "checkbox" });
+        input.checked = f.value === "on";
+      } else if (f.kind === "dropdown") {
         const select = label.createEl("select", { cls: "dropdown" });
         for (const [value, text] of f.options ?? []) select.createEl("option", { value, text });
         input = select;
@@ -145,7 +168,9 @@ class AskModal extends Modal {
       });
       if (f.desc) label.createDiv({ cls: "hm-k-field-desc", text: f.desc });
       inputs.set(f.key, input);
-    }
+      return label;
+    };
+    for (const f of fields) build(f);
     const follow = a.follow, src = follow && inputs.get(follow.from), dst = follow && inputs.get(follow.to);
     if (follow && src && dst) {
       let touched = !!dst.value;
@@ -153,15 +178,16 @@ class AskModal extends Modal {
       src.addEventListener("input", () => { if (!touched) dst.value = follow.map(src.value); });
     }
     const hint = form.createDiv("hm-k-hint"), error = form.createDiv("hm-k-error");
-    const sync = (): void => { hint.setText(a.hint?.(values()) ?? ""); };
+    const buttons = form.createDiv("modal-button-container");
+    // type=button: with a submit button, Enter in any one-line field (a picker mid-choice too) would submit.
+    const cta = buttons.createEl("button", { cls: a.warning ? "mod-warning" : "mod-cta", attr: { type: "button" } });
+    cta.addEventListener("click", () => form.requestSubmit());
+    buttons.createEl("button", { text: "Cancel", attr: { type: "button" } }).addEventListener("click", () => this.close());
+    const sync = (): void => { lead?.setText(say(a.text)); cta.setText(say(a.cta) || "Save"); hint.setText(a.hint?.(values()) ?? ""); };
     form.addEventListener("input", sync);
     form.addEventListener("change", sync);
     sync();
-    const buttons = form.createDiv("modal-button-container");
-    // type=button: with a submit button, Enter in any one-line field (a picker mid-choice too) would submit.
-    const cta = buttons.createEl("button", { cls: a.warning ? "mod-warning" : "mod-cta", text: a.cta ?? "Save", attr: { type: "button" } });
-    cta.addEventListener("click", () => form.requestSubmit());
-    buttons.createEl("button", { text: "Cancel", attr: { type: "button" } }).addEventListener("click", () => this.close());
+    this.insert = (f, before) => form.insertBefore(build(f), inputs.get(before)?.closest("label") ?? hint);
     form.addEventListener("keydown", event => {
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.isComposing) { event.preventDefault(); form.requestSubmit(); }
     });
@@ -180,7 +206,7 @@ class AskModal extends Modal {
         if (result === null) this.close(); else if (this.dismissed) new Notice(result, 10_000); else error.setText(result);
       });
     });
-    ([...inputs.values()].find(el => el.tagName !== "SELECT") ?? cta).focus();
+    ([...inputs.values()].find(el => el.tagName !== "SELECT" && el.type !== "checkbox") ?? cta).focus();
   }
 
   override onClose(): void {
@@ -191,8 +217,10 @@ class AskModal extends Modal {
   }
 }
 
-export function ask(app: App, a: Ask): void {
-  new AskModal(app, a).open();
+export function ask(app: App, a: Ask): AskModal {
+  const modal = new AskModal(app, a);
+  modal.open();
+  return modal;
 }
 
 export function confirmed(app: App, title: string, text: string, cta = "Confirm", warning = false): Promise<boolean> {
@@ -229,6 +257,19 @@ export function askComplete(app: App, n: number, submit: (summary: string, resul
   });
 }
 
+/** Reassigning a running task: Hermes refuses while a worker still holds it unless it is reclaimed first, so the box starts
+ *  unticked and the refusal comes back per card. `cancelled` runs when the form closes without a successful write. */
+export function askReassign(app: App, submit: (reclaim: boolean) => Promise<string | null>, o: { reclaim?: boolean; cancelled?: () => void } = {}): void {
+  let sent = false;
+  ask(app, {
+    title: "Reassign", cta: "Reassign", warning: true,
+    text: "Hermes refuses to reassign a running task while its worker holds it. Reclaiming first stops the worker and returns the task to the queue.",
+    fields: [{ key: "reclaim", label: "Reclaim running cards first", kind: "checkbox", value: o.reclaim ? "on" : "" }],
+    submit: async v => { const error = await submit(v.reclaim === "on"); if (error === null) sent = true; return error; },
+    closed: () => { if (!sent) o.cancelled?.(); },
+  });
+}
+
 /** Model suggestions from a profile's provider cache, read once per modal. */
 function modelPicker(host: TaskHost): (query: string, profile: string) => Promise<Suggestion[]> {
   const cache = new Map<string, Promise<[string, string][]>>();
@@ -254,6 +295,8 @@ export interface TaskHost {
   diagnostics(id: string): Diagnostic[];
   /** Run a verb, then refresh; resolves to the CLI error or null. */
   write(v: Verb): Promise<string | null>;
+  /** Delete a task for good (archive, then purge, in one round trip), then refresh; resolves to the CLI error or null. */
+  remove(id: string): Promise<string | null>;
   /** Why this host takes no more writes (the view closed, or the SSH host changed since it was built: its alias and board are stale), else null. */
   moved(): string | null;
   open(id: string, focus?: Focus): void;
@@ -263,7 +306,7 @@ export interface TaskHost {
 export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked", workdir: string | undefined, created: () => void): void {
   const cards = host.cards(), models = modelPicker(host);
   const tenants = [...new Set(cards.map(c => c.tenant ?? ""))].filter(Boolean).sort();
-  ask(host.app, {
+  const dialog = ask(host.app, {
     title: `New task — ${COLUMNS[column].label}`, cta: "Create",
     fields: [
       { key: "title", label: "Title", kind: "textarea", required: true, enter: true, placeholder: column === "triage" ? "Rough idea — AI will spec it…" : "New task title…" },
@@ -287,7 +330,7 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
     submit: async v => {
       const moved = host.moved();
       if (moved) return moved;
-      const { title = "", body = "", assignee = "", priority = "", tenant = "", parent = "", skills = "", workspace = "scratch", path = "", branch = "", model = "", provider = "", maxRuntime = "", maxRetries = "", goal = "", goalMaxTurns = "" } = v;
+      const { title = "", body = "", assignee = "", priority = "", tenant = "", project = "", parent = "", skills = "", workspace = "scratch", path = "", branch = "", model = "", provider = "", maxRuntime = "", maxRetries = "", goal = "", goalMaxTurns = "" } = v;
       if (priority && !/^-?\d+$/.test(priority)) return "Priority must be a whole number";
       for (const [value, label] of [[maxRetries, "Max retries"], [goalMaxTurns, "Goal max turns"]] as const) {
         if (value && !(/^\d+$/.test(value) && Number(value) >= 1)) return `${label} must be a whole number of at least 1`;
@@ -300,7 +343,7 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
       const task: NewTask = {
         title, workspace: workspace === "scratch" ? "scratch" : `${workspace}:${path}`,
         ...(body ? { body } : {}), ...(assignee ? { assignee } : {}), ...(parent ? { parents: [parent] } : {}),
-        ...(branch ? { branch } : {}), ...(tenant ? { tenant } : {}), ...(Number(priority) ? { priority: Number(priority) } : {}),
+        ...(branch ? { branch } : {}), ...(tenant ? { tenant } : {}), ...(project ? { project } : {}), ...(Number(priority) ? { priority: Number(priority) } : {}),
         ...(column !== "ready" ? { status: column } : {}),
         ...(maxRuntime ? { maxRuntime } : {}), ...(maxRetries ? { maxRetries: Number(maxRetries) } : {}),
         ...(skills ? { skills: skills.split(",").map(s => s.trim()).filter(Boolean) } : {}),
@@ -315,6 +358,11 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
       return null;
     },
   });
+  // The dialog opens at once; projects.db answers while it is up. A project to pick adds the select, a failed or empty read leaves it out, a closed dialog takes nothing.
+  void host.kanban.projects(host.alias).then(found => {
+    if (typeof found === "string" || !found.length) return;
+    dialog.addField({ key: "project", label: "Project", kind: "dropdown", options: [["", "(none, or the board's project)"], ...found.map(({ id, name }): [string, string] => [id, name])] }, "parent");
+  }, () => undefined);
 }
 
 /** One diagnostic with its recovery actions; results land in a Notice. */
@@ -348,11 +396,15 @@ export function diagCard(parent: HTMLElement, host: TaskHost, task: { id: string
         for (const [value, text] of options) select.createEl("option", { value, text });
         action(row, label, () => {
           if (!select.value) { new Notice("Pick a profile first."); return; }
-          const profile = select.value === "none" ? null : select.value;
-          const verb = payload.reclaim_first === true || task.status === "running" ? "reassign" : "assign";
-          const go = (): void => run({ verb, id, profile, reason }, `Reassigned ${id} to ${profile ?? "(unassigned)"}.`, "Reassign failed: ");
-          if (verb === "assign") go();
-          else void confirmed(host.app, "Reassign task", CONFIRM.reassign, "Reassign", true).then(ok => { if (ok) go(); });
+          const profile = select.value === "none" ? null : select.value, done = `Reassigned ${id} to ${profile ?? "(unassigned)"}.`;
+          // The dashboard's own default: the diagnostic says whether to reclaim first, and the box starts there.
+          const reclaim = payload.reclaim_first === true;
+          if (!reclaim && task.status !== "running") { run({ verb: "assign", id, profile, reason }, done, "Reassign failed: "); return; }
+          askReassign(host.app, async r => {
+            const error = await host.write({ verb: "reassign", id, profile, reason, ...(r ? { reclaim: r } : {}) });
+            if (error === null) new Notice(done, 4000);
+            return error;
+          }, { reclaim });
         });
         break;
       }
@@ -795,6 +847,12 @@ export class TaskDrawer {
     if (s === "ready") add("eye", "Request review", "Move to review", () => void this.write({ verb: "request-review", id }));
     if (s === "running") add("eye", "Request review", "Move to review", () => sure("Request review", "Move this task to review? Its worker may still be running.", "Move", false, { verb: "request-review", id, force: true }));
     if (s !== "archived") add("archive", "Archive", "Archive this task", () => sure("Archive task", CONFIRM.archive, "Archive", true, { verb: "archive", id }));
+    add("trash-2", "Delete", "Delete this task permanently", () => void confirmed(app, "Delete task", deleteText(1, s === "running" ? 1 : 0), "Delete", true).then(async ok => {
+      if (!ok) return;
+      const error = await this.host.remove(id);
+      // The task is gone from the board once the reload lands, so the drawer has nothing left to show.
+      if (error === null) this.host.close(); else new Notice(error, 10_000);
+    }));
   }
 
   /** Specify and decompose call an LLM on the host; they get the slow adapter and a sticky notice. */
@@ -830,9 +888,7 @@ export class TaskDrawer {
       const profile = who.value || null, undo = (): void => { who.value = t.assignee ?? ""; };
       who.blur();
       if (t.status !== "running") { void this.write({ verb: "assign", id: this.id, profile }, undo); return; }
-      void confirmed(app, "Reassign task", CONFIRM.reassign, "Reassign", true).then(ok => {
-        if (ok) void this.write({ verb: "reassign", id: this.id, profile, reason: "reassigned from Obsidian" }, undo); else undo();
-      });
+      askReassign(app, reclaim => this.host.write({ verb: "reassign", id: this.id, profile, reason: "reassigned from Obsidian", ...(reclaim ? { reclaim } : {}) }), { cancelled: undo });
     });
 
     const priority = key("Priority");

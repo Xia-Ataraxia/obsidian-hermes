@@ -104,6 +104,27 @@ test("parseDetail classifies sources, dedupes by tier, matches disabled spelling
   expect(detail).toMatchObject({ home: "/home/u", sksum: "123 45", platformDisabled: { telegram: ["local-one"] } });
 });
 
+test("parseDetail masks a setting named for a secret and the secret pairs in a value, but not a boolean, a null or a look-alike like design or bypass", async () => {
+  const words = ["key", "token", "secret", "password", "passwd", "pwd", "passphrase", "auth", "dsn", "webhook", "cookie", "session", "credential", "private", "bearer", "signature"];
+  // The uppercase AZURE_SIG and SMTP_PASS (names), SMTP_PASS= and BYPASS= (pairs) pin the case-insensitive flag of both regexes.
+  const names = [...words.map(word => `x_${word}`), "sig", "x_sig", "AZURE_SIG", "pass", "smtp_pass", "db_pass", "SMTP_PASS"];
+  const lines = [...names.map(name => `${name}: v-${name}`), "az: { sig: v-az }", "private_mode: false", "session_on: true", "cookie_jar:", "session_ttl: 3600",
+    "design: v-design", "design_mode: v-design_mode", "signal: v-signal", "assign_to: v-assign", "bypass: v-bypass", "compass: v-compass", "endpoint: https://example.com/v1",
+    `link: https://x.io/h?${words.map(word => `${word}=v-${word}`).join("&")}&sig=s1&pass=s2&smtp_pass=s3&SMTP_PASS=s4&x_sig=s5&bypass=b1&BYPASS=b2&compass=c1&passthrough=p1&signal=g1&design=d1&assign=a1&v=2`];
+  const config = `plugins:\n  enabled: [memo]\n  entries:\n    memo:\n      settings:\n${lines.map(line => `        ${line}\n`).join("")}`;
+  const detail = await parseDetail(sections([["cfg", config]]), 1);
+  if (typeof detail === "string") throw new Error(detail);
+  expect(detail.plugins.find(plugin => plugin.key === "memo")?.settings).toEqual([
+    ...[...names, "az.sig"].map((name): [string, string] => [name, "••••"]),
+    // A boolean or null holds no secret; a number can (a PIN).
+    ["private_mode", "false"], ["session_on", "true"], ["cookie_jar", ""], ["session_ttl", "••••"],
+    ["design", "v-design"], ["design_mode", "v-design_mode"], ["signal", "v-signal"], ["assign_to", "v-assign"], ["bypass", "v-bypass"], ["compass", "v-compass"], ["endpoint", "https://example.com/v1"],
+    ["link", `https://x.io/h?${words.map(word => `${word}=••••`).join("&")}&sig=••••&pass=••••&smtp_pass=••••&SMTP_PASS=••••&x_sig=••••&bypass=b1&BYPASS=b2&compass=c1&passthrough=p1&signal=g1&design=d1&assign=a1&v=2`],
+  ]);
+  // \b: the masked `sig` must not trip over the visible value v-signal.
+  expect(JSON.stringify(detail)).not.toMatch(new RegExp(`v-(${[...names, ...words, "az"].join("|")})\\b|=s[1-5]`));
+});
+
 test("parseDetail locks toggles when skills.disabled isn't a plain list and rejects a cut-off read", async () => {
   const locked = await parseDetail(new Map([["cfg", "skills:\n  disabled: oops\n"], ["skills", JSON.stringify([[1, LOCAL, "a", "", null]])], ["end", ""]]), 1);
   if (typeof locked === "string") throw new Error(locked);

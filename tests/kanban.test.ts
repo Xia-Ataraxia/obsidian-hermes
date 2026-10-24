@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { attachmentPath, dropVerb, KanbanClient, parseBoard, parseBulk, parseCreate, parseDiagnostics, staleness, stuck, verb, type Card, type Feed, type FeedRow, type Status } from "../src/hermes/kanban";
+import { attachmentPath, dropVerb, KanbanClient, parseBoard, parseBulk, parseCreate, parseDiagnostics, refusal, staleness, STATUSES, stuck, verb, type Card, type Feed, type FeedRow, type Status } from "../src/hermes/kanban";
 import { b64Arg, parseSections } from "../src/hermes/remote";
 import { SshReadOnlyAdapter } from "../src/ui/ssh-read-only-adapter";
 
@@ -37,6 +38,20 @@ test("dropVerb maps column drops to CLI verbs", () => {
   for (const [from, to, want] of cases) expect([from, to, dropVerb(from, to)]).toEqual([from, to, want]);
 });
 
+test("dropVerb lands a card in To-do only through an open parent, and never in Triage, and says why", () => {
+  const todo: [Status, ReturnType<typeof dropVerb>][] = [["blocked", "unblock"], ["scheduled", "unblock"], ["review", "reopen-review"], ["ready", "block"]];
+  for (const [from, want] of todo) expect([from, dropVerb(from, "todo", 1), dropVerb(from, "todo", 0), dropVerb(from, "todo")]).toEqual([from, want, "refuse", "refuse"]);
+  for (const from of ["running", "done", "triage", "archived"] as const) expect([from, dropVerb(from, "todo", 2)]).toEqual([from, "refuse"]);
+  expect(dropVerb("todo", "todo", 1)).toBeNull();
+  for (const from of STATUSES) expect([from, dropVerb(from, "triage", 1)]).toEqual([from, from === "triage" ? null : "refuse"]);
+  // The notice: Triage is Hermes's own; with no open parent To-do has nothing to wait on, whatever the status; with one, the status decides.
+  const triage = "Only Hermes moves tasks into Triage.", waits = "To-do holds tasks that wait on an unfinished parent.";
+  for (const from of STATUSES) for (const open of [undefined, 0, 1]) expect([from, open, refusal(from, "triage", open)]).toEqual([from, open, triage]);
+  for (const from of STATUSES) for (const open of [undefined, 0]) expect([from, open, refusal(from, "todo", open)]).toEqual([from, open, waits]);
+  expect(refusal("running", "todo", 1)).toBe("A running task can't wait on a parent. Reclaim it to Ready first.");
+  for (const from of ["done", "archived", "triage"] as const) expect(refusal(from, "todo", 1)).toBe(`Hermes can't move a ${from} task to To-do.`);
+});
+
 test("staleness ages running cards from their start, the rest from creation", () => {
   const card = (status: Status, extra: Partial<Card> = {}): Card => ({ id: "t", title: "t", status, priority: 0, createdAt: 0, ...extra });
   expect(staleness(card("ready"), 3599)).toBe("");
@@ -61,7 +76,8 @@ test("stuck alerts once per task on known boards, seeds new ones, skips our own 
 
 test("verb keeps ids to safe tokens and free text in base64", () => {
   expect(verb({ verb: "reclaim", id: "t_1", reason: "stale" })).toBe(`reclaim --reason=${b64Arg("stale")} -- t_1`);
-  expect(verb({ verb: "reassign", id: "t_1", profile: null, reason: "r" })).toBe(`reassign --reclaim --reason=${b64Arg("r")} -- t_1 none`);
+  expect(verb({ verb: "reassign", id: "t_1", profile: null, reason: "r" })).toBe(`reassign --reason=${b64Arg("r")} -- t_1 none`);
+  expect(verb({ verb: "reassign", id: "t_1", profile: "bob", reclaim: true })).toBe("reassign --reclaim -- t_1 bob");
   expect(verb({ verb: "complete", id: "t_1", summary: "s", force: true })).toBe(`complete --summary=${b64Arg("s")} --force -- t_1`);
   expect(verb({ verb: "block", id: "t_1", kind: "needs_input", reason: "-x" })).toBe(`block --kind=needs_input -- t_1 ${b64Arg("-x")}`);
   expect(verb({ verb: "purge", id: "t_1" })).toBe("archive --rm=t_1");
@@ -84,6 +100,18 @@ test("CLI output parsers: create, bulk and diagnostics", () => {
     a: { ok: true }, b: { ok: false, message: "cannot archive b" }, c: { ok: false, message: "No confirmation from host" },
     d: { ok: true }, e: { ok: false, message: "cannot delete e (must already be archived)" },
   });
+  // A delete is archive, then purge: when the archive fails the purge fails too, and the archive's message is the one that says why.
+  const pair = (...ids: string[]) => ids.flatMap(id => [{ verb: "archive" as const, id }, { verb: "purge" as const, id }]);
+  const del = sec(["archive", "Archived y\ncannot archive x"], ["purge", "cannot delete x (must already be archived)\nDeleted y\ncannot delete z (must already be archived)"]);
+  expect(parseBulk(del, pair("x", "y", "z"))).toEqual({
+    x: { ok: false, message: "cannot archive x" }, y: { ok: true }, z: { ok: false, message: "No confirmation from host" },
+  });
+  // The archive worked and the purge did not: the message says the task is archived, not gone.
+  expect(parseBulk(sec(["archive", "Archived x"], ["purge", "cannot delete x (must already be archived)"]), pair("x"))).toEqual({
+    x: { ok: false, message: "Archived, but not deleted: cannot delete x (must already be archived)" },
+  });
+  // An ok purge wins: the task was archived elsewhere, so the archive failed, and the task is gone all the same.
+  expect(parseBulk(sec(["archive", "cannot archive x"], ["purge", "Deleted x"]), pair("x"))).toEqual({ x: { ok: true } });
   const aborted = sec(["archive", "Archived a\nTraceback (most recent call last):\nsqlite3.OperationalError: database is locked"]);
   expect(parseBulk(aborted, [{ verb: "archive", id: "c" }])).toEqual({ c: { ok: false, message: "sqlite3.OperationalError: database is locked" } });
   const d = { kind: "stale_claim", severity: "warning", title: "Stale", actions: [] };
@@ -151,6 +179,85 @@ test("bulk stops at a failed chunk and skips the rest", async () => {
   ]);
 });
 
+test("bulk joins a delete's archive and purge across two chunks: first failure stands, an ok purge wins, a lost chunk fills in only what isn't known (never run live)", async () => {
+  const ids = Array.from({ length: 8 }, (_, i) => `t_${i}`);
+  const pairs = ids.flatMap(id => [{ verb: "archive" as const, id }, { verb: "purge" as const, id }]);
+  const lines = (word: string, from: string[]) => from.map(id => `${word} ${id}`).join("\n");
+  // 16 verbs: chunk 1 ends with t_7's archive, chunk 2 is t_7's purge alone. Each reply is what that chunk says of t_7, or a lost chunk.
+  const first = (archive7: string) => ({ stdout: `\u001earchive\n${lines("Archived", ids.slice(0, 7))}\n${archive7}\n\u001epurge\n${lines("Deleted", ids.slice(0, 7))}\n` });
+  const second = (purge7: string) => ({ stdout: `\u001epurge\n${purge7}\n` });
+  const lost = { transport: "timeout", exitCode: null };
+  const run = async (...replies: object[]) => {
+    const slow = fakeSsh(n => replies[n - 1] ?? {});
+    const result = await new KanbanClient(fakeSsh().adapter, slow.adapter).bulk("h", "zz-probe", pairs);
+    return [slow.scripts.length, result.t_7];
+  };
+  const noArchive = "cannot archive t_7", noPurge = "cannot delete t_7 (must already be archived)";
+  expect(await run(first(noArchive), second(noPurge))).toEqual([2, { ok: false, message: noArchive }]);
+  expect(await run(first("Archived t_7"), second(noPurge))).toEqual([2, { ok: false, message: `Archived, but not deleted: ${noPurge}` }]);
+  expect(await run(first(noArchive), second("Deleted t_7"))).toEqual([2, { ok: true }]);
+  // Chunk 2 lost: the archive's definite failure stays; after an ok archive the purge may have run, so it is unknown, not "not deleted".
+  expect(await run(first(noArchive), lost)).toEqual([2, { ok: false, message: noArchive }]);
+  expect(await run(first("Archived t_7"), lost)).toEqual([2, { ok: false, unknown: true, message: "timeout" }]);
+  // Chunk 1 lost: t_7's archive may have run, and the purge that was skipped does not turn that into "Skipped".
+  expect(await run(lost)).toEqual([1, { ok: false, unknown: true, message: "timeout" }]);
+});
+
+test("a new task carries --project, a board goes with --delete only when asked, and the project list is one read (never run live)", async () => {
+  const ssh = fakeSsh(() => ({ stdout: "\u001eok\nCreated t_9  (ready, assignee=-)\n" })), client = new KanbanClient(ssh.adapter, ssh.adapter);
+  await client.create("h", "zz-probe", { title: "T", project: "site" });
+  await client.create("h", "zz-probe", { title: "T" });
+  await client.boards("h", { verb: "rm", slug: "zz-old" });
+  await client.boards("h", { verb: "rm", slug: "zz-old", delete: true });
+  expect(ssh.scripts[0]).toContain(` --project=${b64Arg("site")}`);
+  expect(ssh.scripts[1]).not.toContain("--project");
+  expect(ssh.scripts[2]).toContain("boards rm -- zz-old");
+  expect(ssh.scripts[2]).not.toContain("--delete");
+  expect(ssh.scripts[3]).toContain("boards rm --delete -- zz-old");
+  const read = fakeSsh(() => ({ stdout: '\u001eprojects\n[{"id":"7","name":"Site"},{"id":"8","name":""},{"name":"no id"}]\n' }));
+  expect(await new KanbanClient(read.adapter).projects("h")).toEqual([{ id: "7", name: "Site" }, { id: "8", name: "8" }]);
+  expect(read.scripts[0]).toContain('ro "$H/projects.db"');
+  expect(await new KanbanClient(fakeSsh().adapter).projects("h")).toEqual([]);
+  expect(await new KanbanClient(fakeSsh(() => ({ transport: "timeout", exitCode: null })).adapter).projects("h")).toBe("timeout");
+});
+
+test("the board query counts open parents, the token skips respawn_guarded events and the project query lists unarchived projects (in-memory sqlite)", async () => {
+  const ssh = fakeSsh(), client = new KanbanClient(ssh.adapter);
+  await client.board("h", "zz-probe", false);
+  await client.projects("h");
+  const sqlOf = (script: string | undefined) => [...(script ?? "").matchAll(/<<'SQL'[^\n]*\n([\s\S]*?)\nSQL/g)].map(m => m[1]!);
+  const token = sqlOf(ssh.scripts[0]).find(sql => sql.includes("respawn_guarded"))!, tasks = sqlOf(ssh.scripts[0]).find(sql => sql.startsWith("with sm as"))!;
+  const db = new Database(":memory:");
+  db.run(`create table tasks (id, title, assignee, status, priority, tenant, created_at, started_at, completed_at, block_kind, block_recurrences, consecutive_failures,
+      last_failure_error, last_heartbeat_at, max_runtime_seconds, worker_pid, claim_expires, body, result, current_run_id);
+    create table task_links (parent_id, child_id);
+    create table task_comments (task_id);
+    create table task_runs (id integer primary key, task_id, summary, started_at, ended_at);
+    create table task_events (id integer primary key, task_id, kind, payload);
+    create table projects (id integer primary key, slug, name, archived integer);`);
+  db.run(`insert into tasks (id, title, status, created_at) values ('p1','p','running',1), ('p2','p','done',1), ('p3','p','archived',1),
+      ('open','c','todo',2), ('closed','c','ready',2), ('none','c','ready',2), ('gone','c','todo',2)`);
+  db.run(`insert into task_links values ('p1','open'), ('p2','open'), ('p2','closed'), ('p3','closed'), ('missing','gone')`);
+  db.run("insert into task_events (task_id, kind) values ('open','created'), ('open','respawn_guarded'), ('open','respawn_guarded')");
+  const parents = () => Object.fromEntries(parseBoard(sec(["tasks", db.query(tasks).values()[0]![0] as string])).tasks.map(c => [c.id, [c.parents, c.openParents]]));
+  expect(parents()).toMatchObject({ open: [2, 1], closed: [2, undefined], none: [undefined, undefined], gone: [1, undefined] });
+  const at = () => db.query(token).values()[0]![0];
+  expect(at()).toBe("1.7");
+  db.run("insert into task_events (task_id, kind) values ('open','respawn_guarded')");
+  expect(at()).toBe("1.7");
+  db.run("insert into task_events (task_id, kind) values ('open','heartbeat')");
+  expect(at()).toBe("5.7");
+  // Only the last 5000 event ids are walked: the heartbeat (id 5) is the latest real event until 5000 respawn_guarded ones follow it.
+  const guarded = (n: number) => db.run(`insert into task_events (task_id, kind) select 'open','respawn_guarded' from (with recursive n(i) as (select 1 union all select i+1 from n where i<${n}) select i from n)`);
+  guarded(4999);
+  expect(at()).toBe("5.7");
+  guarded(1);
+  expect(at()).toBe("0.7");
+  // Projects: unarchived (a null flag counts), by name or else slug, ignoring case.
+  db.run("insert into projects (slug, name, archived) values ('b','Beta',0), ('a','',0), ('old','Old',1), ('z','alpha',null)");
+  expect(JSON.parse(db.query(sqlOf(ssh.scripts[1])[0]!).values()[0]![0] as string)).toEqual([{ id: "2", name: "a" }, { id: "4", name: "alpha" }, { id: "1", name: "Beta" }]);
+});
+
 test("attachmentPath accepts only <root>/<task id>/<file>", () => {
   const root = "/h/.hermes/kanban/attachments", ok = `${root}/t_1/f.txt`;
   expect(attachmentPath(ok, root, "t_1")).toBe(ok);
@@ -193,6 +300,7 @@ test("poll reads the board only when the probed token moved (never run live)", a
   expect(await client.poll("h", "zz-probe", false)).toBeNull();
   expect(await client.poll("h", "zz-probe", false)).toMatchObject({ token: "2.1" });
   expect(ssh.scripts.map(s => s.includes("S board"))).toEqual([true, false, false, true]);
+  expect(ssh.scripts[1]).toContain("kind<>'respawn_guarded'");
 });
 
 test("watch asks once per tick, and only a moved token calls changed (never run live)", async () => {
@@ -218,4 +326,5 @@ test("watch asks once per tick, and only a moved token calls changed (never run 
   feed("\u001e?0");
   expect(live.tick()).toBe(false);
   expect([argv.includes("-n"), argv.includes("BatchMode=yes")]).toEqual([false, true]);
+  expect(Buffer.from(argv.join(" ").match(/printf %s (\S+)/)![1]!, "base64").toString()).toContain("kind<>'respawn_guarded'");
 });

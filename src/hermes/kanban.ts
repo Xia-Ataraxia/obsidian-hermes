@@ -14,7 +14,7 @@ export interface Card {
   readonly id: string; title: string; status: Status; priority: number; readonly createdAt: number;
   assignee?: string; tenant?: string; startedAt?: number; completedAt?: number; blockKind?: string; blockRecurrences?: number;
   failures?: number; lastError?: string; heartbeatAt?: number; maxRuntime?: number; pid?: number; claimExpires?: number;
-  comments?: number; parents?: number; children?: number; childrenDone?: number; text?: string; reason?: string;
+  comments?: number; parents?: number; openParents?: number; children?: number; childrenDone?: number; text?: string; reason?: string;
 }
 export interface BoardMeta { slug: string; name: string; description?: string; icon?: string; color?: string; workdir?: string; project?: string; archived: boolean; counts: Partial<Record<Status, number>> }
 /** One board pull; `tasks` is the previous list when the token showed nothing changed. */
@@ -53,7 +53,7 @@ export interface Alert { board: string; boardName: string; task: string; title: 
 export interface NewTask {
   title: string; body?: string; assignee?: string; parents?: string[]; workspace?: string; branch?: string; tenant?: string; priority?: number;
   status?: "triage" | "blocked"; maxRuntime?: string; maxRetries?: number; skills?: string[]; model?: string; provider?: string;
-  goal?: boolean; goalMaxTurns?: number;
+  goal?: boolean; goalMaxTurns?: number; project?: string;
 }
 export type Verb =
   | { verb: "promote" | "archive" | "purge" | "specify" | "decompose"; id: string }
@@ -61,7 +61,7 @@ export type Verb =
   | { verb: "block"; id: string; kind?: "capability" | "dependency" | "needs_input" | "transient"; reason: string }
   | { verb: "complete"; id: string; summary?: string; result?: string; force?: boolean }
   | { verb: "request-review"; id: string; force?: boolean }
-  | { verb: "assign" | "reassign"; id: string; profile: string | null; reason?: string }
+  | { verb: "assign" | "reassign"; id: string; profile: string | null; reason?: string; reclaim?: boolean }
   | { verb: "set-model"; id: string; model: string | null; provider?: string }
   | { verb: "edit"; id: string; title?: string; body?: string; priority?: number }
   | { verb: "link" | "unlink"; id: string; child: string }
@@ -69,10 +69,10 @@ export type Verb =
   | { verb: "attach-rm"; id: string; attachment: number }
   | { verb: "attach"; id: string; name: string; type?: string; bytes: Uint8Array }
   | { verb: "notify-subscribe" | "notify-unsubscribe"; id: string; platform: string; chat: string; thread?: string };
-/** `settings` rewrites a live board through `boards create` (there is no edit verb); `rm` archives it. */
+/** `settings` rewrites a live board through `boards create` (there is no edit verb); `rm` archives it, or with `delete` removes its folder. */
 export type BoardVerb =
   | { verb: "create" | "settings"; slug: string; name: string; description: string; icon: string; color: string; workdir: string }
-  | { verb: "rm"; slug: string };
+  | { verb: "rm"; slug: string; delete?: boolean };
 export type Drop = "promote" | "unblock" | "reopen-review" | "reclaim" | "block" | "complete" | "archive";
 
 /* ───────────────────────── Scripts ───────────────────────── */
@@ -105,8 +105,11 @@ done
 S profiles; for d in "$H"/profiles/*/; do s=$(basename "$d"); [ "$s" != default ] && [ -f "$d/config.yaml" ] && echo "$s"; done
 S config; awk '/^kanban:/{f=1;next} f&&/^[^ #]/{exit} f' "$H/config.yaml" 2>/dev/null | grep -E '^ +(lane_by_profile|auto_decompose|orchestrator_profile|default_assignee):' || true`;
 
-// ponytail: token = last event id + task count, so heartbeat and claim changes wait for the next event, live mode included (D29)
-const TOKEN = "select coalesce((select max(id) from task_events),0)||'.'||(select count(*) from tasks);";
+// ponytail: token = newest event id + task count. Heartbeat and claim changes append events, so they move it; respawn_guarded
+// (the dispatcher's note, about one a minute while a card is parked) is skipped. `kind` has no index, but the walk back from the
+// newest id stops at the first other event. The walk is bounded to the last 5000 ids: a longer run of respawn_guarded rows reads as
+// token 0 until another event lands. A write that appends no event (workspace path, branch) waits for the next event or a forced read.
+const TOKEN = "select coalesce((select id from task_events where kind<>'respawn_guarded' and id>(select max(id) from task_events)-5000 order by id desc limit 1),0)||'.'||(select count(*) from tasks);";
 /** A poll tick's probe: the board's token alone. A board without a db prints none, so the full read runs (and falls back). */
 const probeScript = (slug: string): string => String.raw`db=${dbPath(slug)}; [ -f "$db" ] || exit 0
 S token; ro "$db" <<'SQL'
@@ -137,7 +140,7 @@ S token; echo "$tok"
 with sm as (select task_id, summary from (select task_id, summary, row_number() over (partition by task_id order by coalesce(ended_at,started_at) desc, id desc) rn
               from task_runs where summary is not null and summary<>'') where rn=1),
   kids as (select l.parent_id id, count(*) total, sum(c.status='done') done from task_links l join tasks c on c.id=l.child_id group by l.parent_id),
-  ups as (select child_id id, count(*) n from task_links group by child_id),
+  ups as (select l.child_id id, count(*) n, sum(p.status not in ('done','archived')) open from task_links l left join tasks p on p.id=l.parent_id group by l.child_id),
   cm as (select task_id id, count(*) n from task_comments group by task_id)
 select json_group_array(json_patch('{}',json_object(
   'id',t.id,'title',t.title,'assignee',t.assignee,'status',t.status,'priority',t.priority,'tenant',t.tenant,
@@ -145,7 +148,7 @@ select json_group_array(json_patch('{}',json_object(
   'blockKind',t.block_kind,'blockRecurrences',nullif(t.block_recurrences,0),'failures',nullif(t.consecutive_failures,0),
   'lastError',substr(t.last_failure_error,1,120),'heartbeatAt',t.last_heartbeat_at,'maxRuntime',t.max_runtime_seconds,
   'pid',t.worker_pid,'claimExpires',t.claim_expires,
-  'comments',nullif(cm.n,0),'parents',nullif(ups.n,0),'children',kids.total,'childrenDone',kids.done,
+  'comments',nullif(cm.n,0),'parents',nullif(ups.n,0),'openParents',nullif(ups.open,0),'children',kids.total,'childrenDone',kids.done,
   'text',nullif(trim(substr(coalesce(t.body,''),1,150)||' '||substr(coalesce(t.result,''),1,75)||' '||substr(coalesce(sm.summary,''),1,75)),''),
   'reason',case when t.status in ('blocked','triage') then (select case when json_valid(e.payload) then substr(coalesce(json_extract(e.payload,'$.reason'),json_extract(e.payload,'$.error')),1,200) end
      from task_events e where e.task_id=t.id and e.kind in ('blocked','block_loop_detected','gave_up','timed_out','crashed') order by e.id desc limit 1) end)))
@@ -295,19 +298,39 @@ export function parseDiagnostics(text: string | undefined): Record<string, Diagn
   return out;
 }
 
-/** Bulk replies for one chunk. Archives share the `archive` section and purges the `purge` one: `Archived <id>` /
+/** One outcome per verb of a chunk. Archives share the `archive` section and purges the `purge` one: `Archived <id>` /
  *  `Deleted <id>`, else the id's own `cannot ... <id>` line, else the section's last line that names no id (a call
  *  that aborted). Any other verb: `ok <id>`, or `fail <id>` followed by that call's stderr. */
-export function parseBulk(sections: Sections, verbs: Verb[]): Record<string, Outcome> {
+function replies(sections: Sections, verbs: Verb[]): [Verb, Outcome][] {
   const last = (lines: string[]) => lines.filter(Boolean).pop() || "No confirmation from host";
-  return Object.fromEntries(verbs.map(({ verb: kind, id }): [string, Outcome] => {
-    if (kind !== "archive" && kind !== "purge") return [id, sections.has(`ok ${id}`) ? { ok: true }
+  return verbs.map((v): [Verb, Outcome] => {
+    const { verb: kind, id } = v;
+    if (kind !== "archive" && kind !== "purge") return [v, sections.has(`ok ${id}`) ? { ok: true }
       : { ok: false, message: last((sections.get(`fail ${id}`) ?? "").split("\n").map(line => line.trim())) }];
     const lines = (sections.get(kind) ?? "").split("\n").map(line => line.trim());
-    if (lines.includes(`${kind === "archive" ? "Archived" : "Deleted"} ${id}`)) return [id, { ok: true }];
-    return [id, { ok: false, message: lines.find(line => line.startsWith("cannot ") && line.split(/\s+/)[2] === id)
+    if (lines.includes(`${kind === "archive" ? "Archived" : "Deleted"} ${id}`)) return [v, { ok: true }];
+    return [v, { ok: false, message: lines.find(line => line.startsWith("cannot ") && line.split(/\s+/)[2] === id)
       ?? last(lines.filter(line => !/^(Archived|Deleted|cannot) /.test(line))) }];
-  }));
+  });
+}
+
+/** An id's outcome so far plus the next verb's, in run order. A delete is archive, then purge, and the pair can land in two
+ *  chunks. The first failure stands, since a failed archive makes the purge fail with a lesser message, and a failure that is
+ *  already definite or unknown is not replaced by a later "unknown" or "Skipped". An ok purge wins whatever the archive said
+ *  (the card was archived elsewhere). A purge that fails after an ok archive says so, unless it is unknown (it may have run). */
+function fold(prev: Outcome | undefined, kind: string, o: Outcome): Outcome {
+  if (!prev) return o;
+  if (kind !== "purge") return prev.ok ? o : prev;
+  if (o.ok) return o;
+  if (!prev.ok) return prev;
+  return o.unknown ? o : { ...o, message: `Archived, but not deleted: ${o.message}` };
+}
+
+/** Bulk replies for one chunk, by id. */
+export function parseBulk(sections: Sections, verbs: Verb[]): Record<string, Outcome> {
+  const out: Record<string, Outcome> = {};
+  for (const [v, o] of replies(sections, verbs)) out[v.id] = fold(out[v.id], v.verb, o);
+  return out;
 }
 
 /** `Created <id>  (<status>, assignee=<x>)`, plus the CLI's warning when no dispatcher will pick a ready task up. */
@@ -354,12 +377,27 @@ const DROPS: Partial<Record<Status, Partial<Record<Status, Drop>>>> = {
   done: { ready: "complete", running: "complete", blocked: "complete", review: "complete" },
 };
 
-/** The verb a column drop runs; "refuse" where no command lands there, null where the move is locked. */
-export function dropVerb(from: Status, to: Status): Drop | "refuse" | null {
+/** Hermes has no status verb; these land a card in todo, and only while a parent is open (else blocked/scheduled/review go to
+ *  ready, and block turns into needs_input). Running is not here: block never stops the worker, so reclaim comes first.
+ *  ponytail: an open parent is one that is not done or archived (the kernel's terminal statuses as read). If the kernel counts
+ *  more as terminal, a drop is allowed and lands in Ready (the landing notice says so); if fewer, a drop that would work is refused. */
+const TODO: Partial<Record<Status, Drop>> = { blocked: "unblock", scheduled: "unblock", review: "reopen-review", ready: "block" };
+
+/** The verb a column drop runs; "refuse" where no command lands there, null where the move is locked. `open` is the card's open parents. */
+export function dropVerb(from: Status, to: Status, open = 0): Drop | "refuse" | null {
   if (from === to) return null;
   if (to === "archived") return "archive";
-  if (to === "triage" || to === "todo") return "refuse";
+  if (to === "triage") return "refuse";
+  if (to === "todo") return (open ? TODO[from] : undefined) ?? "refuse";
   return DROPS[to]?.[from] ?? null;
+}
+
+/** Why a "refuse" drop does nothing, for the notice. `open` is the card's open parents, as for dropVerb. */
+export function refusal(from: Status, to: Status, open = 0): string {
+  return to === "triage" ? "Only Hermes moves tasks into Triage."
+    : !open ? "To-do holds tasks that wait on an unfinished parent."
+    : from === "running" ? "A running task can't wait on a parent. Reclaim it to Ready first."
+    : `Hermes can't move a ${from} task to To-do.`;
 }
 
 function int(value: number): number {
@@ -382,7 +420,7 @@ export function verb(v: Verb): string {
     case "complete": return `complete${flag("summary", v.summary)}${flag("result", v.result)}${v.force ? " --force" : ""} -- ${id}`;
     case "request-review": return `request-review${v.force ? " --force" : ""} -- ${id}`;
     case "assign": return `assign -- ${id} ${v.profile ? safeToken(v.profile) : "none"}`;
-    case "reassign": return `reassign --reclaim${flag("reason", v.reason)} -- ${id} ${v.profile ? safeToken(v.profile) : "none"}`;
+    case "reassign": return `reassign${v.reclaim ? " --reclaim" : ""}${flag("reason", v.reason)} -- ${id} ${v.profile ? safeToken(v.profile) : "none"}`;
     case "set-model": return `set-model${flag("provider", v.provider)} -- ${id} ${v.model ? b64Arg(v.model) : "none"}`;
     case "edit": return `edit${flag("title", v.title)}${v.body === undefined ? "" : ` --body=${b64Arg(v.body)}`}${v.priority === undefined ? "" : ` --priority=${int(v.priority)}`} -- ${id}`;
     case "link": case "unlink": return `${v.verb} -- ${id} ${safeToken(v.child)}`;
@@ -401,7 +439,7 @@ function createArgs(t: NewTask): string {
     + (t.status === "triage" ? " --triage" : t.status === "blocked" ? " --initial-status=blocked" : "")
     + flag("body", t.body) + (t.assignee ? ` --assignee=${safeToken(t.assignee)}` : "")
     + (t.parents ?? []).map(parent => ` --parent=${safeToken(parent)}`).join("")
-    + flag("workspace", t.workspace) + flag("branch", t.branch) + flag("tenant", t.tenant)
+    + flag("workspace", t.workspace) + flag("branch", t.branch) + flag("tenant", t.tenant) + flag("project", t.project)
     + (t.priority === undefined ? "" : ` --priority=${int(t.priority)}`)
     + (t.maxRuntime ? ` --max-runtime=${safeToken(t.maxRuntime)}` : "")
     + (t.maxRetries === undefined ? "" : ` --max-retries=${int(t.maxRetries)}`)
@@ -576,9 +614,10 @@ hermes kanban --board ${safeToken(slug)} ${verb(v)} </dev/null >/dev/null && S o
 
   /** Chunks of CHUNK verbs, one script each on the slow adapter, one after another. In a chunk all archives share one
    *  CLI call and all purges another; every other verb gets its own, so each failure keeps its own stderr. A failed
-   *  chunk stops the run: its own ids come back unknown (any of them may have run), the ids after it skipped. */
+   *  chunk stops the run: its own ids come back unknown (any of them may have run), the ids after it skipped, as fold() merges them. */
   async bulk(alias: string, slug: string, verbs: Verb[]): Promise<Record<string, Outcome>> {
     const board = safeToken(slug), now = Date.now(), results: Record<string, Outcome> = {};
+    const put = (v: Verb, o: Outcome): void => { results[v.id] = fold(results[v.id], v.verb, o); };
     for (const v of verbs) if (v.verb === "block") this.mine.set(v.id, now);
     // ponytail: 15 running archives x ~5 s + startup is ~85 s, inside the 120 s slow adapter; raise CHUNK only with a longer timeout
     for (let i = 0; i < verbs.length; i += CHUNK) {
@@ -592,11 +631,12 @@ hermes kanban --board ${safeToken(slug)} ${verb(v)} </dev/null >/dev/null && S o
       ].filter(Boolean).join("\n");
       const result = await runScript(this.slow, alias, script, 256 * 1024);
       if (!result.ok) {
-        for (const v of chunk) results[v.id] = { ok: false, unknown: true, message: result.message };
-        for (const v of verbs.slice(i + CHUNK)) results[v.id] = { ok: false, message: "Skipped: an earlier batch failed" };
+        for (const v of chunk) put(v, { ok: false, unknown: true, message: result.message });
+        for (const v of verbs.slice(i + CHUNK)) put(v, { ok: false, message: "Skipped: an earlier batch failed" });
         break;
       }
-      Object.assign(results, parseBulk(result.sections, chunk));
+      // A delete's archive and purge can land in different chunks; fold() joins them as it does within one.
+      for (const [v, o] of replies(result.sections, chunk)) put(v, o);
     }
     for (const v of verbs) if (v.verb === "block" && !results[v.id]?.ok) this.mine.delete(v.id);
     return results;
@@ -610,6 +650,17 @@ hermes kanban --board ${safeToken(slug)} ${verb(v)} </dev/null >/dev/null && S o
     return { ok: true, ...created };
   }
 
+  /** The New task dialog's project choices: unarchived rows of the default home's projects.db, read-only; none when the file is
+   *  missing. Binding a whole board to a project stays with the dashboard (no CLI verb sets it). */
+  async projects(alias: string): Promise<{ id: string; name: string }[] | string> {
+    const result = await runScript(this.adapter, alias, `[ -f "$H/projects.db" ] || exit 0
+S projects; ro "$H/projects.db" <<'SQL' || exit 1
+select json_group_array(json_object('id',cast(id as text),'name',coalesce(nullif(name,''),slug))) from (select * from projects where coalesce(archived,0)=0 order by coalesce(nullif(name,''),slug) collate nocase);
+SQL`, 256 * 1024);
+    if (!result.ok) return result.message;
+    return list<unknown>(json<unknown>(result.sections.get("projects"), null)).map(rec).map(p => ({ id: str(p.id), name: str(p.name) || str(p.id) })).filter(p => p.id);
+  }
+
   /** `dispatch --max=8`, summarised to its Spawned / Skipped lines. */
   async nudge(alias: string, slug: string): Promise<Captured> {
     const result = await this.capture(alias, `--board ${safeToken(slug)} dispatch --max=8`);
@@ -621,7 +672,7 @@ hermes kanban --board ${safeToken(slug)} ${verb(v)} </dev/null >/dev/null && S o
     if (v.slug === "default" && v.verb !== "settings") return { ok: false, message: "The default board is built in" };
     if (v.verb === "create" && !SLUG.test(v.slug)) return { ok: false, message: "Slugs use lowercase letters, digits, - and _" };
     const slug = safeToken(v.slug);
-    if (v.verb === "rm") return this.kanban(alias, `boards rm -- ${slug}`, live(slug));
+    if (v.verb === "rm") return this.kanban(alias, `boards rm${v.delete ? " --delete" : ""} -- ${slug}`, live(slug));
     const guard = v.verb === "create" ? `[ -e "$H/kanban/boards/${slug}" ] && { echo "Board '${slug}' already exists" >&2; exit 1; }\n` : live(slug);
     return this.kanban(alias, `boards create --name=${b64Arg(v.name)} --description=${b64Arg(v.description)} --icon=${b64Arg(v.icon)} --color=${b64Arg(v.color)} --default-workdir=${b64Arg(v.workdir)} -- ${slug}`, guard);
   }

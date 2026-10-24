@@ -58,7 +58,12 @@ export type ToolUse = Readonly<Record<string, number>>;
 /* ───────────────────────── Remote scripts ───────────────────────── */
 
 const CHANGED = "Changed on the server. Reload first.";
-const SECRET = /key|token|secret|password|auth/i;
+// ponytail: any name containing one of these is masked, so it over-masks (a "private_dir" or "session_ttl" setting shows ••••); trim the list if that bites.
+// `sig` (a SAS signature) and `pass` count only as a whole segment between `.`, `_` or `-`, since inside "design", "assign", "bypass" or "compass" they would hide too much; camelCase `smtpPass` or `azureSig` is not caught.
+const SECRET_WORDS = "key|token|secret|password|passwd|pwd|passphrase|auth|dsn|webhook|cookie|session|credential|private|bearer|signature";
+const SECRET = new RegExp(`${SECRET_WORDS}|(?:^|[._-])sig(?:[._-]|$)|(?:^|[._-])pass(?:[._-]|$)`, "i");
+/** `name=value` inside a text: the SECRET words anywhere in the name, and `sig=` or `pass=` after any non-alphanumeric (`?pass=`, `x_sig=`, not `bypass=` or `design=`). */
+const PAIR = new RegExp(`((?:${SECRET_WORDS})\\w*=|(?:^|[^a-z0-9])(?:sig|pass)=)[^&\\s]+`, "gi");
 const KINDS = new Set(["standalone", "backend", "exclusive", "platform", "model-provider"]);
 export const EDIT_CAP = 64 * 1024;
 
@@ -177,13 +182,15 @@ const str = (value: unknown): string => typeof value === "string" ? value.trim()
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 /** Drops `user:pass@` from URLs and masks credential-looking values: `token=`-style pairs and bearer tokens. */
 const bare = (text: string): string => text.replace(/\/\/[^/@\s]+@/g, "//")
-  .replace(/((?:key|token|secret|password|auth)\w*=)[^&\s]+/gi, "$1••••").replace(/(bearer\s+)\S+/gi, "$1••••");
+  .replace(PAIR, "$1••••").replace(/(bearer\s+)\S+/gi, "$1••••");
 /** Every spelling `skills.disabled` may use for a skill: name, dir name, relative dir; plugin skills only by `ns:skill`. */
 const forms = (tier: number, name: string, rdir: string): string[] => tier === 4 ? [name] : [name, rdir.slice(rdir.lastIndexOf("/") + 1), rdir];
 
 function flatten(value: unknown, prefix: string): [string, string][] {
   if (value !== null && typeof value === "object") return Object.entries(value).flatMap(([name, item]) => flatten(item, prefix ? `${prefix}.${name}` : name));
-  return [[prefix, SECRET.test(prefix) ? "••••" : typeof value === "string" ? bare(value) : typeof value === "number" || typeof value === "boolean" ? String(value) : ""]];
+  // A boolean or null can't hold a secret, so `private: false` stays readable; a number can (a PIN), so it is masked.
+  const open = value === null || typeof value === "boolean";
+  return [[prefix, SECRET.test(prefix) && !open ? "••••" : typeof value === "string" ? bare(value) : typeof value === "number" || typeof value === "boolean" ? String(value) : ""]];
 }
 
 function envNames(value: unknown): string[] {
