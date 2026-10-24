@@ -14,9 +14,11 @@ import { PluginDataGateway } from "./ui/plugin-data-gateway";
 import { ControlCenterTargets } from "./ui/control-center-targets";
 import { HermesClient } from "./hermes/data";
 import { hues } from "./hermes/geometry";
+import { InspectClient } from "./hermes/inspect";
 import { KANBAN_VIEW, KanbanView } from "./hermes/kanban-view";
 import { PROFILES_VIEW, ProfilesView } from "./hermes/profiles-view";
 import { HermesView, type HermesHost, type Layout } from "./hermes/ui";
+import { JobDetailModal } from "./ui/job-detail-modal";
 
 interface PersistedData {
   readonly settings?: Partial<ViewerSettings>;
@@ -111,6 +113,8 @@ export default class HermesCronViewerPlugin extends Plugin {
       edgeMode: () => this.settings.edgeMode,
       setEdgeMode: mode => this.setEdgeMode(mode),
       openSettings: () => this.openSettings(),
+      inspect: new InspectClient(this.adapter),
+      openJob: (job, profile) => new JobDetailModal(this.app, job, profile, this.adapter, this.state.bodies, this.settings.historyLimit).open(),
     };
     this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
     this.registerView(PROFILES_VIEW, leaf => new ProfilesView(leaf, host));
