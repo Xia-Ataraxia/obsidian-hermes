@@ -17,6 +17,8 @@ import { hues } from "./hermes/geometry";
 import { KANBAN_VIEW, KanbanView } from "./hermes/kanban-view";
 import { PROFILES_VIEW, ProfilesView } from "./hermes/profiles-view";
 import { HermesView, type HermesHost, type Layout } from "./hermes/ui";
+import { HermesChat } from "./hermes/chat";
+import { CHAT_VIEW, ChatView } from "./hermes/chat-view";
 
 interface PersistedData {
   readonly settings?: Partial<ViewerSettings>;
@@ -73,7 +75,7 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.registerView(WEEK_CALENDAR_VIEW, (leaf) => new WeekCalendarView(leaf, this.state));
 
     this.addRibbonIcon("clock", "Hermes: Today", () => {
-      void this.activateView(TODAY_TIMELINE_VIEW, "right");
+      void this.activateView(TODAY_TIMELINE_VIEW, "right", true);
     });
     this.addRibbonIcon("settings", "Hermes: Settings", () => {
       this.openSettings();
@@ -82,12 +84,12 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.addCommand({
       id: "open-today-timeline",
       name: "Open today timeline",
-      callback: () => void this.activateView(TODAY_TIMELINE_VIEW, "right"),
+      callback: () => void this.activateView(TODAY_TIMELINE_VIEW, "right", true),
     });
     this.addCommand({
       id: "open-week-calendar",
       name: "Open week calendar",
-      callback: () => void this.activateView(WEEK_CALENDAR_VIEW, "tab"),
+      callback: () => void this.activateView(WEEK_CALENDAR_VIEW, "tab", true),
     });
     this.addCommand({
       id: "refresh-now",
@@ -111,6 +113,7 @@ export default class HermesCronViewerPlugin extends Plugin {
       edgeMode: () => this.settings.edgeMode,
       setEdgeMode: mode => this.setEdgeMode(mode),
       openSettings: () => this.openSettings(),
+      chat: new HermesChat(this.adapter, this.processes),
     };
     this.registerView(KANBAN_VIEW, leaf => new KanbanView(leaf, host));
     this.registerView(PROFILES_VIEW, leaf => new ProfilesView(leaf, host));
@@ -118,6 +121,9 @@ export default class HermesCronViewerPlugin extends Plugin {
     this.addRibbonIcon("network", "Hermes: Profiles", () => void this.openHermes(PROFILES_VIEW));
     this.addCommand({ id: "open-hermes-kanban", name: "Open kanban", callback: () => void this.openHermes(KANBAN_VIEW) });
     this.addCommand({ id: "open-hermes-profiles", name: "Open profiles", callback: () => void this.openHermes(PROFILES_VIEW) });
+    this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, host));
+    this.addRibbonIcon("message-square", "Hermes: Chat", () => void this.activateView(CHAT_VIEW, "right"));
+    this.addCommand({ id: "open-hermes-chat", name: "Open chat", callback: () => void this.activateView(CHAT_VIEW, "right") });
 
     this.addSettingTab(new HermesCronSettingsTab(this.app, this));
   }
@@ -222,14 +228,14 @@ export default class HermesCronViewerPlugin extends Plugin {
     app.setting.openTabById(this.manifest.id);
   }
 
-  private async activateView(viewType: string, placement: "right" | "tab"): Promise<void> {
+  private async activateView(viewType: string, placement: "right" | "tab", refresh = false): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(viewType);
     const leaf: WorkspaceLeaf | null =
       existing[0] ??
       (placement === "right" ? this.app.workspace.getRightLeaf(false) : this.app.workspace.getLeaf("tab"));
     if (leaf === null) return;
     await leaf.setViewState({ type: viewType, active: true });
-    this.app.workspace.revealLeaf(leaf);
-    this.scheduler.trigger();
+    await this.app.workspace.revealLeaf(leaf);
+    if (refresh) this.scheduler.trigger();
   }
 }

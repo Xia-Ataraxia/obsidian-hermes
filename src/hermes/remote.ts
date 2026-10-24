@@ -23,11 +23,11 @@ arg() { printf %s "$1" | base64 -d; }
 ro() { q=$(cat); if [ -e "$1-wal" ] && printf '%s\\n' "$q" | sqlite3 -readonly "$1" 2>/dev/null; then :; else printf '%s\\n' "$q" | sqlite3 "file:$1?immutable=1"; fi; }
 `;
 
-const SAFE_TOKEN = /^[A-Za-z0-9_.-]{1,64}$/;
+const SAFE_TOKEN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 
 /** Profile ids, board slugs and task ids are interpolated only after this check. */
 export function safeToken(value: string): string {
-  if (!SAFE_TOKEN.test(value) || value.startsWith(".")) throw new Error(`Unsafe remote token: ${value}`);
+  if (!SAFE_TOKEN.test(value)) throw new Error(`Unsafe remote token: ${value}`);
   return value;
 }
 
@@ -47,13 +47,19 @@ export function parseSections(stdout: string): Sections {
 }
 
 // Tailscale SSH reports exit 0 for every command, so the script prints its own status last.
-const STATUS = /\u001e\?(\d+)\n?$/;
+export const STATUS = /\u001e\?(\d+)\n?$/;
+
+/** The `sh -c` wrapper every remote script travels in, base64-encoded so the login shell never parses it: PRELUDE,
+ *  the script in a subshell, then its exit status as a last `\x1e?<code>` line (see STATUS). */
+export function shellCommand(script: string): string {
+  const encoded = Buffer.from(`${PRELUDE}(\n${script}\n)\nprintf '\\036?%s\\n' "$?"\n`, "utf8").toString("base64");
+  return `sh -c "$(printf %s ${encoded} | base64 -d)"`;
+}
 
 export async function runScript(adapter: SshReadOnlyAdapter, alias: string, script: string, byteCap = 4 * 1024 * 1024): Promise<RemoteResult> {
-  const encoded = Buffer.from(`${PRELUDE}(\n${script}\n)\nprintf '\\036?%s\\n' "$?"\n`, "utf8").toString("base64");
   const outcome = await adapter.run(alias, {
     kind: "hermes",
-    remoteCommand: `sh -c "$(printf %s ${encoded} | base64 -d)"`,
+    remoteCommand: shellCommand(script),
     byteCap,
     nulSeparated: false,
   });

@@ -14,6 +14,7 @@ export interface HermesHost {
   edgeMode(): EdgeMode;
   setEdgeMode(mode: EdgeMode): void;
   openSettings(): void;
+  readonly chat: import("./chat").HermesChat;
 }
 
 /* ───────────── small DOM helpers ───────────── */
