@@ -359,10 +359,11 @@ export class ProfileModal extends Modal {
     new ToggleComponent(wrap).setValue(on).setDisabled(locked !== null).onChange(change);
     const text = locked ?? tip;
     if (text) setTooltip(wrap, text);
-    // Inside a <summary> a click would also fold the card: cancel that, but let the checkbox itself work.
+    // Inside a <summary> a click would also fold the card: cancel that, but not on the switch itself. Obsidian's switch
+    // is a <label> that flips by clicking its hidden checkbox, so cancelling a click on the label leaves it stuck.
     wrap.addEventListener("click", event => {
       event.stopPropagation();
-      if ((event.target as Element).tagName !== "INPUT") event.preventDefault();
+      if (!(event.target as Element).closest("input, label")) event.preventDefault();
     });
   }
 
