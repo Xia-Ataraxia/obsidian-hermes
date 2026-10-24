@@ -198,11 +198,11 @@ export class ActivityPane {
   async refresh(): Promise<void> {
     if (this.disposed || this.reading) return;
     this.reading = true;
-    this.refreshButton.addClass("is-spinning");
+    this.refreshButton.addClass("hm-spinning");
     const result = await this.client.read(this.alias, this.profile).catch((e: unknown) => e instanceof Error ? e.message : String(e));
     this.reading = false;
     if (this.disposed) return;
-    this.refreshButton.removeClass("is-spinning");
+    this.refreshButton.removeClass("hm-spinning");
     if (typeof result === "string") {
       this.error = result;
       if (!this.data) this.empty("wifi-off", result, true);

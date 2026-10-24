@@ -1,7 +1,8 @@
-import { ItemView, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type { CronJobRecord, ProfileRef } from "../types/hermes-cron";
 import type { EdgeMode } from "../types/snapshot";
 import type { ActivityClient } from "./activity";
+import type { DiskCache } from "./cache";
 import type { HermesClient } from "./data";
 import { hue } from "./geometry";
 import type { InspectClient } from "./inspect";
@@ -24,6 +25,8 @@ export interface HermesHost {
   board(alias: string): string;
   saveBoard(alias: string, slug: string): void;
   readonly inspect: InspectClient;
+  /** The last data each view showed, per host; see cache.ts. */
+  readonly cache: DiskCache;
   openJob(job: CronJobRecord, profile: ProfileRef): void;
   openChat(alias: string, profile: string): void;
   readonly activity: ActivityClient;
@@ -110,6 +113,15 @@ export abstract class HermesView extends ItemView {
   private inflight: Promise<void> | null = null;
   /** A non-quiet reload came in mid-pull; that pull may predate a write, so pull once more after it. */
   private again = false;
+  /** The host and key the screen shows; a change drops what was loaded and restores the saved copy of the new one. */
+  private ctx = "";
+  /** The data on screen came from disk, not from a pull (only the stamp tooltip says so). */
+  private fromCache = false;
+  /** When the disk copy of this ctx was last written (or read); see `save`. */
+  private savedAt = 0;
+  private restoring: Promise<void> = Promise.resolve();
+  /** Set by onClose: from then on nothing starts an ssh read or paints into the detached container. A subclass checks it after its own awaits. */
+  protected closed = false;
 
   constructor(leaf: WorkspaceLeaf, protected readonly host: HermesHost, private readonly pollMs: number) {
     super(leaf);
@@ -120,6 +132,18 @@ export abstract class HermesView extends ItemView {
   protected abstract render(): void;
   /** True while a drag or an edit would be clobbered by a re-render. */
   protected busy(): boolean { return false; }
+  /** Where this view keeps its last-seen data under the host, or null to keep none. */
+  protected cacheKey(): string | null { return null; }
+  /** What to keep after a successful pull; build it with a keep* function from cache.ts. */
+  protected cacheData(): unknown { return null; }
+  /**
+   * Called on every host or key change with the saved data, or null on a miss. It must replace what the view
+   * holds (so null drops the previous host's data) and return true when there is something to show.
+   * A host change also calls it with null at once, before the saved copy loads.
+   */
+  protected cacheRestore(_saved: unknown): boolean { return false; }
+  /** Called at once when the host changes: close or clear what only fits the old host (a drawer, a selection). */
+  protected leaveHost(): void { /* nothing by default */ }
 
   override getState(): Record<string, unknown> {
     return { ...super.getState(), alias: this.alias };
@@ -127,9 +151,14 @@ export abstract class HermesView extends ItemView {
 
   override async setState(state: unknown, result: ViewStateResult): Promise<void> {
     const alias = (state as { alias?: unknown } | null)?.alias;
-    if (typeof alias === "string" && alias !== this.alias) {
-      this.alias = alias;
-      if (this.body) void this.reload();
+    if (typeof alias === "string") {
+      if (alias !== this.alias) {
+        this.alias = alias;
+        if (this.body) void this.reload();
+      }
+      // The toolbar was built before this alias arrived (ChatView sets it before calling here).
+      const select = this.toolbar?.querySelector<HTMLSelectElement>("select.hm-server");
+      if (select) select.value = alias;
     }
     await super.setState(state, result);
   }
@@ -146,6 +175,11 @@ export abstract class HermesView extends ItemView {
     this.registerInterval(window.setInterval(() => this.tick(), 15_000));
     // Not awaited: Obsidian holds the tab blank (and its saved state) until onOpen resolves.
     void this.reload();
+  }
+
+  override async onClose(): Promise<void> {
+    this.closed = true;
+    await super.onClose();
   }
 
   private buildToolbar(): void {
@@ -166,39 +200,102 @@ export abstract class HermesView extends ItemView {
   }
 
   protected async reload(quiet = false): Promise<void> {
+    if (this.closed) return;
+    if (!this.alias) this.buildToolbar();
+    const entered = this.enter();
     if (this.inflight) {
-      if (!quiet) this.again = true;
+      // A new host or key still owes its pull, however the reload came in.
+      if (!quiet || entered) this.again = true;
       return this.inflight;
     }
-    if (!this.alias) {
-      this.buildToolbar();
-      if (!this.alias) return this.empty("server", "No SSH host", "Settings", () => this.host.openSettings());
-    }
-    this.refreshButton.addClass("is-spinning");
-    if (!quiet && !this.loadedAt) this.empty("loader", "Loading…");
-    const alias = this.alias;
+    if (!this.alias) return this.empty("server", "No SSH host", "Settings", () => this.host.openSettings());
+    this.refreshButton.addClass("hm-spinning");
+    if (!quiet && !entered && !this.loadedAt) this.empty("loader", "Loading…");
+    const { alias, ctx } = this;
     this.inflight = (async () => {
+      await this.restoring;
+      if (this.closed || ctx !== this.ctx) return;
       const error = await this.pull(alias).catch((e: unknown) => e instanceof Error ? e.message : String(e));
-      if (alias !== this.alias) return;
+      if (this.closed || ctx !== this.ctx) return;
       if (error !== null) {
-        if (!quiet || this.loadedAt === 0) this.empty("wifi-off", error, "Retry", () => void this.reload());
+        // Whatever is on screen, saved or live, stays; only an empty view shows the error in its place.
+        if (!this.loadedAt) this.empty("wifi-off", error, "Retry", () => void this.reload());
+        else if (!quiet && !this.again) new Notice(`Hermes: ${error}`, 10_000);
         this.stamp.addClass("is-stale");
         setTooltip(this.stamp, error);
         return;
       }
       this.loadedAt = Date.now();
+      this.fromCache = false;
       this.stamp.removeClass("is-stale");
       this.tick();
+      // Before render: a view may change its cards in place once they are drawn.
+      this.save();
       if (!this.busy()) this.render();
     })().catch((e: unknown) => {
       console.error(e);
-      this.empty("triangle-alert", e instanceof Error ? e.message : String(e), "Retry", () => void this.reload());
+      if (!this.closed) this.empty("triangle-alert", e instanceof Error ? e.message : String(e), "Retry", () => void this.reload());
     }).finally(() => {
       this.inflight = null;
-      this.refreshButton.removeClass("is-spinning");
+      if (this.closed) return;
+      this.refreshButton.removeClass("hm-spinning");
       if (this.again) { this.again = false; void this.reload(); }
     });
     return this.inflight;
+  }
+
+  /** True when the host or key changed: drops what was loaded and starts restoring the saved copy of the new one. */
+  private enter(): boolean {
+    if (!this.alias) return false;
+    const key = this.cacheKey(), ctx = `${this.alias}\0${key ?? ""}`;
+    if (ctx === this.ctx) return false;
+    // A new key on the same host keeps the screen until its saved copy lands; a new host must not.
+    const moved = this.ctx !== "" && !this.ctx.startsWith(`${this.alias}\0`);
+    this.ctx = ctx;
+    this.loadedAt = this.savedAt = 0;
+    this.fromCache = false;
+    // No age or warning left over from the previous host.
+    this.stamp.setText("");
+    this.stamp.removeClass("is-stale");
+    if (moved) {
+      // At once, so nothing of the old host is clickable while the new one loads: a write would send its board and task ids on.
+      this.leaveHost();
+      this.cacheRestore(null);
+      this.empty("loader", "Loading…");
+    }
+    const alias = this.alias;
+    this.restoring = (async () => {
+      const saved = key ? await this.host.cache.load(alias, key) : null;
+      // Closed or switched away meanwhile, or fresher data landed first.
+      if (this.closed || ctx !== this.ctx || this.loadedAt) return;
+      try {
+        // The hook runs on a miss too, to drop the previous host's data.
+        if (this.cacheRestore(saved ? saved.data : null) && saved) {
+          this.loadedAt = this.savedAt = saved.at;
+          this.fromCache = true;
+          this.tick();
+          if (!this.busy()) this.render();
+          return;
+        }
+      } catch (e) {
+        // A copy of another shape reads as a miss, so it can never leave the view half drawn.
+        console.error(e);
+        this.loadedAt = this.savedAt = 0;
+        this.fromCache = false;
+        this.stamp.setText("");
+        this.cacheRestore(null);
+      }
+      this.empty("loader", "Loading…");
+    })().catch(console.error);
+    return true;
+  }
+
+  private save(): void {
+    const key = this.cacheKey(), data = key ? this.cacheData() : null;
+    // ponytail: one write per host and key, then at most one per 5 min, so the disk lags the screen by up to that much.
+    if (!key || data == null || Date.now() - this.savedAt < 5 * 60_000) return;
+    this.savedAt = Date.now();
+    this.host.cache.save(this.alias, key, data);
   }
 
   /** Redraw from the data already loaded (e.g. after a color change). */
@@ -209,7 +306,9 @@ export abstract class HermesView extends ItemView {
   private tick(): void {
     if (!this.loadedAt || !this.stamp) return;
     this.stamp.setText(relative(this.loadedAt / 1000));
-    setTooltip(this.stamp, `Updated ${new Date(this.loadedAt).toLocaleTimeString()}`);
+    // A failed pull left its error as the tooltip; keep it.
+    if (this.stamp.hasClass("is-stale")) return;
+    setTooltip(this.stamp, `${this.fromCache ? "Cached ·" : "Updated"} ${new Date(this.loadedAt).toLocaleTimeString()}`);
   }
 
   protected empty(iconName: string, text: string, action?: string, onAction?: () => void): void {

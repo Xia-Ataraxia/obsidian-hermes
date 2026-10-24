@@ -221,12 +221,12 @@ export class HermesCronSettingsTab extends PluginSettingTab {
       );
 
     new Setting(parent)
-      .setName("Cached schedule metadata")
-      .setDesc("Stored in the vault config folder and may sync. Bodies are never written to disk.")
+      .setName("Cached data")
+      .setDesc("Last-seen schedules, kanban boards (titles, no task text), profiles, skill and plugin rows and the chat profile list, stored in the vault config folder where they may sync. Nothing is cached while the job names switch above is off. Chat messages, session titles, task bodies, job prompts, memory and skill files and secrets are never written to disk.")
       .addExtraButton((button) =>
         button.setIcon("eraser").setTooltip("Clear cache").onClick(async () => {
           await this.plugin.clearCache();
-          notify("Cached schedule metadata cleared.");
+          notify("Cached data cleared.");
         }),
       );
   }

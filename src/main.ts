@@ -13,6 +13,7 @@ import { SnapshotDiskStore } from "./ui/snapshot-disk-store";
 import { PluginDataGateway } from "./ui/plugin-data-gateway";
 import { ControlCenterTargets } from "./ui/control-center-targets";
 import { ActivityClient } from "./hermes/activity";
+import { diskCache, type DiskCache } from "./hermes/cache";
 import { HermesClient } from "./hermes/data";
 import { hues } from "./hermes/geometry";
 import { InspectClient } from "./hermes/inspect";
@@ -50,6 +51,7 @@ export default class HermesCronViewerPlugin extends Plugin {
   /** Set first in onunload(), so a watcher read still in flight writes no cursors and shows no notices. */
   private unloaded = false;
   private kanban!: KanbanClient;
+  private cache!: DiskCache;
   readonly processes = new ControlCenterProcesses();
   readonly targets = new ControlCenterTargets({
     settings: () => this.settings,
@@ -80,6 +82,9 @@ export default class HermesCronViewerPlugin extends Plugin {
 
     this.adapter = new SshReadOnlyAdapter({ runner: this.processes.runner });
     this.kanban = new KanbanClient(this.adapter, new SshReadOnlyAdapter({ runner: this.processes.runner, timeoutMs: 120_000 }));
+    // The views' last-seen data, under the plugin folder. It follows "Store job names on disk": when that is off, nothing is read or written.
+    const dir = this.manifest.dir;
+    this.cache = diskCache(this.app.vault.adapter, dir ? `${dir}/cache` : null, () => this.settings.persistJobNames);
     this.state = new ViewerState(this.adapter, this.settings, this.logger);
     for (const [alias, home] of Object.entries(this.remoteHomes)) {
       this.state.rememberHome(alias, home);
@@ -145,6 +150,7 @@ export default class HermesCronViewerPlugin extends Plugin {
         void this.data.update<Record<string, unknown>>(current => ({ ...current, hermesBoards: this.boards }));
       },
       inspect: new InspectClient(this.adapter),
+      cache: this.cache,
       openJob: (job, profile) => new JobDetailModal(this.app, job, profile, this.adapter, this.state.bodies, this.settings.historyLimit).open(),
       openChat: (alias, profile) => void this.activateView(CHAT_VIEW, "right").then(() => {
         const view = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0]?.view;
@@ -184,6 +190,7 @@ export default class HermesCronViewerPlugin extends Plugin {
   async saveSettings(settings: ViewerSettings): Promise<void> {
     if (!this.targets.active) return;
     this.processes.allow(settings.servers);
+    if (this.settings.persistJobNames && !settings.persistJobNames) void this.cache.drop();
     this.settings = settings;
     this.state.setSettings(settings);
     this.scheduler.setInterval(settings.autoRefreshSeconds * 1000);
@@ -215,6 +222,7 @@ export default class HermesCronViewerPlugin extends Plugin {
     delete this.cursors[alias];
     this.state.forgetServer(alias);
     await this.store.removeServer(alias);
+    await this.cache.drop(alias);
     await this.persist();
   }
 
@@ -227,6 +235,7 @@ export default class HermesCronViewerPlugin extends Plugin {
   async clearCache(): Promise<void> {
     await this.store.clear();
     this.state.bodies.clear();
+    await this.cache.drop();
   }
 
   private async persist(): Promise<void> {

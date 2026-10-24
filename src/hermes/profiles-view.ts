@@ -1,5 +1,6 @@
 import { Notice, setTooltip, type WorkspaceLeaf } from "obsidian";
 import type { EdgeMode } from "../types/snapshot";
+import { keepProfiles } from "./cache";
 import type { Edge, Profile, ProfilesSnapshot } from "./data";
 import { curve, hue, overlap, ring, snap, tidy, type Gap, type Guide, type Rect } from "./geometry";
 import { Inspector } from "./inspector";
@@ -96,9 +97,33 @@ export class ProfilesView extends HermesView {
     return this.pressed || this.dragging || (this.inspector?.editing ?? false);
   }
 
+  protected override cacheKey(): string { return "profiles"; }
+
+  protected override cacheData(): unknown { return this.snapshot && keepProfiles(this.snapshot); }
+
+  protected override cacheRestore(saved: unknown): boolean {
+    this.snapshot = null;
+    const copy = saved as Partial<ProfilesSnapshot> | null;
+    if (!copy || typeof copy.now !== "number" || !Array.isArray(copy.profiles) || !Array.isArray(copy.edges)) return false;
+    this.adopt(this.alias, copy as ProfilesSnapshot);
+    return true;
+  }
+
+  /** A host change closes the inspector and drops the picks at once; the base then empties `snapshot` (cacheRestore(null)). */
+  protected override leaveHost(): void {
+    this.picks.clear();
+    this.inspector?.close();
+  }
+
   protected async pull(alias: string): Promise<string | null> {
     const result = await this.host.client.profiles(alias);
     if (typeof result === "string" || alias !== this.alias) return typeof result === "string" ? result : null;
+    this.adopt(alias, result);
+    return null;
+  }
+
+  /** Takes a snapshot of `alias`, saved or live; the first one of a host also loads its layout and drops the last host's picks. */
+  private adopt(alias: string, snapshot: ProfilesSnapshot): void {
     if (alias !== this.loadedAlias) {
       this.loadedAlias = alias;
       this.positions = new Map(Object.entries(this.host.layout(alias)));
@@ -106,8 +131,7 @@ export class ProfilesView extends HermesView {
       this.picks.clear();
       this.inspector?.close();
     }
-    this.snapshot = result;
-    return null;
+    this.snapshot = snapshot;
   }
 
   protected render(): void {
@@ -579,6 +603,7 @@ export class ProfilesView extends HermesView {
   }
 
   override async onClose(): Promise<void> {
+    await super.onClose();
     this.land?.();
     this.dragging = false;
     this.observer?.disconnect();

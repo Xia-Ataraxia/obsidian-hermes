@@ -33,7 +33,7 @@ Monitor and manage [Hermes Agent](https://github.com/NousResearch/hermes-agent) 
 - **Files outside your vault.** The plugin reads no files outside your vault. Your system `ssh` reads your SSH config, keys and agent as usual; the plugin never changes them.
 - **Accounts and payment.** None, apart from your own Hermes host.
 - **Telemetry and ads.** None.
-- **Stored data.** Settings and the canvas layout live in the plugin's `data.json`, inside your vault's `.obsidian` folder. Secrets and chat transcripts are never written to disk.
+- **Stored data.** Settings and the canvas layout live in the plugin's `data.json`, inside your vault's `.obsidian` folder. The last-seen boards (card titles only), profiles, schedules and skill rows are kept in its `cache` folder, so a view opens at once and refreshes behind it; the eraser in the settings clears them, and nothing is kept while "Store job names on disk" is off. Secrets and chat transcripts are never written to disk.
 
 ## Development
 

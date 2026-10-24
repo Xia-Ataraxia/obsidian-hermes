@@ -76,7 +76,7 @@
 
 .hm-icon-btn.clickable-icon { padding: 4px; border-radius: 6px; }
 .hm-icon-btn svg { width: 16px; height: 16px; }
-.is-spinning svg { animation: hm-spin 0.9s linear infinite; }
+.hm-spinning svg { animation: hm-spin 0.9s linear infinite; }
 @keyframes hm-spin { to { transform: rotate(360deg); } }
 
 .hm-avatar {
