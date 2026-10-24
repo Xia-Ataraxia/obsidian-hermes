@@ -118,6 +118,11 @@ export class ProfileModal extends Modal {
   private editor: { readonly path: string; readonly original: string; readonly area: HTMLTextAreaElement } | null = null;
   /** On the keymap stack while the editor is open, so Escape cancels the edit instead of closing the modal. */
   private editScope: Scope | null = null;
+  /** On the modal's document while editScope is pushed. Obsidian keeps Tab inside a modal only while the modal's own
+   *  scope is on top (no public setter for another scope), so Tab could walk out and the next one indent a note. */
+  private readonly keepFocus = (event: FocusEvent): void => {
+    if (this.editor && !(event.target as Element).closest(".modal-container, .menu")) this.editor.area.focus();
+  };
   private readonly files = new Map<string, Promise<FileRead | string>>();
   private readonly runCache = new Map<string, Runs>();
   /** Toggle states sent but not yet read back. */
@@ -218,6 +223,7 @@ export class ProfileModal extends Modal {
   /** Safe to repeat. A scope left behind would eat Escape app-wide; popScope also removes one that isn't on top. */
   private popEditScope(): void {
     if (this.editScope) { this.app.keymap.popScope(this.editScope); this.editScope = null; }
+    this.modalEl.doc.removeEventListener("focusin", this.keepFocus, true);
   }
 
   /** The toggle state to show: the one just asked for, until a read agrees. */
@@ -522,6 +528,7 @@ export class ProfileModal extends Modal {
       this.editScope = new Scope(this.scope);
       this.editScope.register([], "Escape", event => { if (event.isComposing) return; cancel.click(); return false; });
       this.app.keymap.pushScope(this.editScope);
+      this.modalEl.doc.addEventListener("focusin", this.keepFocus, true);
       area.focus();
     };
 

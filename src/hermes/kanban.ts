@@ -378,10 +378,10 @@ export class KanbanClient {
   constructor(private readonly adapter: SshReadOnlyAdapter, private readonly slow = adapter) {}
 
   /* The in-memory side of the view's disk cache. What reaches disk is keepBoard(read) (cache.ts), a whitelist of
-     card metadata and titles, the stored board entries (name, description, workdir, icon, color, counts) and the
-     profile names, plus two layout flags of `config` (lane_by_profile, auto_decompose) written as the strings
-     "true"/"false": never the rest of `config`, bodies, comments, events or logs. `cacheData` hands back the full
-     read, so a caller that saves it passes it through keepBoard first. */
+     card metadata and titles, the stored board entries (slug, name, description, workdir, icon, color, archived,
+     counts) and the profile names, plus two layout flags of `config` (lane_by_profile, auto_decompose) written as
+     the strings "true"/"false": never the rest of `config`, bodies, comment text, events or logs. `cacheData` hands
+     back the full read, so a caller that saves it passes it through keepBoard first. */
   cacheKey(alias: string, slug: string, archived: boolean): string {
     return `${alias}|${slug}|${archived ? 1 : 0}`;
   }

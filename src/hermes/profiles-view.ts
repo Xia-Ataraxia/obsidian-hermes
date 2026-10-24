@@ -30,7 +30,7 @@ export const EDGE_MODES: readonly (readonly [EdgeMode, string, string, string, s
 ];
 
 function svg<K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attrs: Record<string, string | number> = {}): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG, tag);
+  const el = parent.doc.createElementNS(SVG, tag);
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
   parent.appendChild(el);
   return el;

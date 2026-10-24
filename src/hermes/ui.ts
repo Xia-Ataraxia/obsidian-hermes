@@ -170,7 +170,7 @@ export abstract class HermesView extends ItemView {
     this.body = this.contentEl.createDiv("hm-body");
     this.buildToolbar();
     this.registerInterval(window.setInterval(() => {
-      if (!document.hidden && this.contentEl.isShown() && !this.busy()) void this.reload(true);
+      if (!this.contentEl.doc.hidden && this.contentEl.isShown() && !this.busy()) void this.reload(true);
     }, this.pollMs));
     this.registerInterval(window.setInterval(() => this.tick(), 15_000));
     // Not awaited: Obsidian holds the tab blank (and its saved state) until onOpen resolves.
