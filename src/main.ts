@@ -83,7 +83,7 @@ export default class HermesCronViewerPlugin extends Plugin {
     for (const [id, h] of Object.entries(data.hermesHues ?? {})) hues.set(id, h);
 
     this.adapter = new SshReadOnlyAdapter({ runner: this.processes.runner });
-    this.kanban = new KanbanClient(this.adapter, new SshReadOnlyAdapter({ runner: this.processes.runner, timeoutMs: 120_000 }));
+    this.kanban = new KanbanClient(this.adapter, new SshReadOnlyAdapter({ runner: this.processes.runner, timeoutMs: 120_000 }), this.processes);
     // The views' last-seen data, under the plugin folder. It follows "Store job names on disk": when that is off, nothing is read or written.
     const dir = this.manifest.dir;
     this.cache = diskCache(this.app.vault.adapter, dir ? `${dir}/cache` : null, () => this.settings.persistJobNames);

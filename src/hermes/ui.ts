@@ -110,7 +110,7 @@ export abstract class HermesView extends ItemView {
   private stamp!: HTMLElement;
   private refreshButton!: HTMLElement;
   private loadedAt = 0;
-  private inflight: Promise<void> | null = null;
+  protected inflight: Promise<void> | null = null;
   /** A non-quiet reload came in mid-pull; that pull may predate a write, so pull once more after it. */
   private again = false;
   /** The host and key the screen shows; a change drops what was loaded and restores the saved copy of the new one. */

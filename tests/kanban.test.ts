@@ -194,3 +194,28 @@ test("poll reads the board only when the probed token moved (never run live)", a
   expect(await client.poll("h", "zz-probe", false)).toMatchObject({ token: "2.1" });
   expect(ssh.scripts.map(s => s.includes("S board"))).toEqual([true, false, false, true]);
 });
+
+test("watch asks once per tick, and only a moved token calls changed (never run live)", async () => {
+  const ssh = new SshReadOnlyAdapter({ runner: () => Promise.resolve({ stdout: "\u001eboard\nzz-probe\n\u001etoken\n1.1\n\u001etasks\n[]\n", stderr: "", exitCode: 0, capExceeded: false }) });
+  const writes: string[] = [];
+  let argv: readonly string[] = [], feed = (_line: string): void => undefined;
+  const processes = { stream: (_file: string, args: readonly string[], options: { onStdout(line: string): void }) => {
+    argv = args;
+    feed = line => options.onStdout(line);
+    return { stop() {}, write: (text: string) => writes.push(text), done: new Promise(() => {}) };
+  } };
+  const client = new KanbanClient(ssh, ssh, processes as never);
+  await client.board("h", "zz-probe", false);
+  let changed = 0;
+  const live = client.watch("h", "zz-probe", () => false, () => changed++);
+  expect([live.tick(), live.tick(), writes.length]).toEqual([true, true, 1]);
+  feed("1.1");
+  feed("");
+  expect(changed).toBe(0);
+  live.tick();
+  feed("2.1");
+  expect([changed, writes.length]).toEqual([1, 2]);
+  feed("\u001e?0");
+  expect(live.tick()).toBe(false);
+  expect([argv.includes("-n"), argv.includes("BatchMode=yes")]).toEqual([false, true]);
+});

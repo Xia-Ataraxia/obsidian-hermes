@@ -1,7 +1,8 @@
 /** Kanban over SSH: each read is one POSIX sh script (sqlite3 read-only through the PRELUDE `ro`), each write one `hermes kanban` verb. */
+import type { ControlCenterProcesses } from "../ui/control-center-processes";
 import type { SshReadOnlyAdapter } from "../ui/ssh-read-only-adapter";
 import { profileDir, type Outcome } from "./data";
-import { b64Arg, json, readBytes, runScript, safeToken, type RemoteResult, type Sections } from "./remote";
+import { b64Arg, json, readBytes, runScript, safeToken, shellCommand, STATUS, type RemoteResult, type Sections } from "./remote";
 
 /* ───────────────────────── Types ───────────────────────── */
 
@@ -104,13 +105,22 @@ done
 S profiles; for d in "$H"/profiles/*/; do s=$(basename "$d"); [ "$s" != default ] && [ -f "$d/config.yaml" ] && echo "$s"; done
 S config; awk '/^kanban:/{f=1;next} f&&/^[^ #]/{exit} f' "$H/config.yaml" 2>/dev/null | grep -E '^ +(lane_by_profile|auto_decompose|orchestrator_profile|default_assignee):' || true`;
 
-// ponytail: token = last event id + task count, so heartbeat and claim changes wait for the next event (D29)
+// ponytail: token = last event id + task count, so heartbeat and claim changes wait for the next event, live mode included (D29)
 const TOKEN = "select coalesce((select max(id) from task_events),0)||'.'||(select count(*) from tasks);";
 /** A poll tick's probe: the board's token alone. A board without a db prints none, so the full read runs (and falls back). */
 const probeScript = (slug: string): string => String.raw`db=${dbPath(slug)}; [ -f "$db" ] || exit 0
 S token; ro "$db" <<'SQL'
 ${TOKEN}
 SQL`;
+/** Live mode (watch): one token line per stdin line, empty when the read failed; stdin's EOF ends the loop.
+ *  A fresh `ro` per line, not one long sqlite3: an immutable connection (ro's fallback) never sees later writes.
+ *  ponytail: an abrupt network loss leaves the sh idle in `read`, holding no db handle, until sshd drops the dead link (TCP
+ *  keepalive, about 2 h); set ClientAliveInterval on the host if idle shells pile up. */
+const watchScript = (slug: string): string => String.raw`db=${dbPath(slug)}; [ -f "$db" ] || exit 0
+while read -r t; do ro "$db" <<'SQL' || echo
+${TOKEN}
+SQL
+done`;
 
 function boardScript(slug: string, last: string | null, archived: boolean): string {
   return String.raw`${LIST}
@@ -417,8 +427,8 @@ export class KanbanClient {
   readonly mine = new Map<string, number>();
   private readonly reads = new Map<string, BoardRead>();
 
-  /** `slow` carries specify and decompose, which wait on an LLM. */
-  constructor(private readonly adapter: SshReadOnlyAdapter, private readonly slow = adapter) {}
+  /** `slow` carries specify and decompose, which wait on an LLM; `processes` runs live mode's stream (watch). */
+  constructor(private readonly adapter: SshReadOnlyAdapter, private readonly slow = adapter, private readonly processes?: ControlCenterProcesses) {}
 
   /* The in-memory side of the view's disk cache. What reaches disk is keepBoard(read) (cache.ts), a whitelist of
      card metadata and titles, the stored board entries (slug, name, description, workdir, icon, color, archived,
@@ -464,6 +474,34 @@ export class KanbanClient {
       if (result.sections.get("token") === last) return null;
     }
     return this.board(alias, slug, archived);
+  }
+
+  /** Live mode: one ssh session that answers each `tick()` with the board token, and `changed` when an answer differs from the
+   *  cached read's. `tick` is false once the stream ended or a tick went 8 s without a token: live mode is down. */
+  watch(alias: string, slug: string, archived: () => boolean, changed: () => void): { tick(): boolean; stop(): void } {
+    const cap = 1024 * 1024;
+    const argv = this.adapter.buildArgv(alias, { kind: "hermes", remoteCommand: shellCommand(watchScript(slug)), byteCap: cap, nulSeparated: false, keepStdin: true });
+    let asked = 0, ended = false;
+    // An hour at most; the view starts the next session at once.
+    const run = this.processes!.stream("ssh", argv, { stdin: true, timeoutMs: 3_600_000, maxBytes: cap, onStderr() {}, onStdout: line => {
+      // Once stopped, close flushes a partial line; it is no token.
+      if (ended) return;
+      // The script's status line (STATUS) closes the stream; it is no token.
+      if (STATUS.test(line)) { ended = true; return; }
+      // A failed read answers empty: the tick stays open, so a host whose reads keep failing drops to the poll's probe.
+      if (!line) return;
+      asked = 0;
+      if (line !== this.reads.get(this.cacheKey(alias, slug, archived()))?.token) changed();
+    } });
+    void run.done.then(() => { ended = true; });
+    return {
+      tick: () => {
+        if (ended || (asked && Date.now() - asked > 8_000)) return false;
+        if (!asked) { asked = Date.now(); run.write("\n"); }
+        return true;
+      },
+      stop: () => { ended = true; run.stop(); },
+    };
   }
 
   async detail(alias: string, slug: string, id: string): Promise<Detail | string> {

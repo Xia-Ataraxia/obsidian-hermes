@@ -80,8 +80,8 @@ export class SshReadOnlyAdapter {
     if (!aliasCheck.ok) {
       throw new Error(`refusing to run against alias ${alias}: ${aliasCheck.detail}`);
     }
-    // `-n` (stdin from /dev/null) stays on every command except one that sends bytes.
-    return [...(command.stdin ? FIXED_OPTIONS.filter(option => option !== "-n") : FIXED_OPTIONS), "--", alias, command.remoteCommand];
+    // `-n` (stdin from /dev/null) stays on every command except one that sends bytes or keeps writing.
+    return [...(command.stdin || command.keepStdin ? FIXED_OPTIONS.filter(option => option !== "-n") : FIXED_OPTIONS), "--", alias, command.remoteCommand];
   }
 
   async run(alias: string, command: BoundRemoteCommand): Promise<RemoteExecOutcome> {

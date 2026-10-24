@@ -21,6 +21,8 @@ export interface BoundRemoteCommand {
   readonly nulSeparated: boolean;
   /** Bytes for the remote command's stdin; without them stdin is /dev/null (`ssh -n`). */
   readonly stdin?: Uint8Array;
+  /** The caller keeps writing to stdin while the command runs (a stream's `write`), so no `ssh -n` either. */
+  readonly keepStdin?: boolean;
 }
 
 /** Why a command was refused. A refused command is never assembled. */

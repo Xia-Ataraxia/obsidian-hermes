@@ -54,15 +54,18 @@ export class ControlCenterProcesses {
       });
     });
   }
-  /** One long-lived remote command with line callbacks; never rejects, and is `refused` when it never ran. Tracked like `run`, so `cancel`/`dispose` stop it. */
-  stream(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number; onStdout(line: string): void; onStderr(line: string): void }):
-    { stop(): void; readonly done: Promise<{ exitCode: number | null; stderrTail: string; refused?: boolean }> } {
+  /** One long-lived remote command with line callbacks; never rejects, and is `refused` when it never ran. Tracked like `run`, so `cancel`/`dispose` stop it.
+   *  With `stdin`, its stdin stays open for `write`, which does nothing once stopped or closed. */
+  stream(file: string, args: readonly string[], options: { readonly timeoutMs: number; readonly maxBytes: number; readonly stdin?: boolean; onStdout(line: string): void; onStderr(line: string): void }):
+    { stop(): void; write(text: string): void; readonly done: Promise<{ exitCode: number | null; stderrTail: string; refused?: boolean }> } {
     const alias = args[args.indexOf("--") + 1] ?? "";
-    if (this.disposed || this.retired.has(alias)) return { stop() {}, done: Promise.resolve({ exitCode: null, stderrTail: "Connection closed", refused: true }) };
+    if (this.disposed || this.retired.has(alias)) return { stop() {}, write() {}, done: Promise.resolve({ exitCode: null, stderrTail: "Connection closed", refused: true }) };
     // Plain promises, not Promise.withResolvers: older Obsidian installers ship Chromium < 119.
     let settle!: (result: { exitCode: number | null; stderrTail: string }) => void;
     const done = new Promise<{ exitCode: number | null; stderrTail: string }>(resolve => { settle = resolve; });
-    const child = spawn(file, [...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(file, [...args], { stdio: [options.stdin ? "pipe" : "ignore", "pipe", "pipe"] });
+    // A host gone mid-write breaks the pipe (EPIPE); the stream's own close says why.
+    child.stdin?.on("error", () => undefined);
     let bytes = 0;
     let tail = "";
     // Why we stopped; it goes after the tail on close, so stderr that keeps coming never pushes it out.
@@ -109,7 +112,7 @@ export class ControlCenterProcesses {
       this.children.delete(owned);
       settle({ exitCode: stopped ? null : exitCode, stderrTail: tail + reason });
     });
-    return { stop, done };
+    return { stop, write: text => { if (!stopped && !closed) child.stdin?.write(text); }, done };
   }
   allow(aliases: readonly string[]): void { for (const alias of aliases) this.retired.delete(alias); }
   async cancel(alias: string): Promise<void> {

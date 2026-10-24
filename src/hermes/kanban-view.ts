@@ -102,6 +102,11 @@ export class KanbanView extends HermesView {
   private force = false;
   /** Poll ticks still to skip after a failed read, so a failing host is tried once a minute. */
   private backoff = 0;
+  /** Live mode's session for the shown host and board; null while hidden or down (then the poll tick probes). */
+  private live: { tick(): boolean; stop(): void } | null = null;
+  /** Live mode's last start (host and board, and when): after a failure the same pair waits out a minute before the next try. */
+  private tried = { key: "", at: 0 };
+  private liveTimer = 0;
   private landing: { ids: string[]; to: Status } | null = null;
   private switcher!: HTMLButtonElement;
   private pill!: HTMLButtonElement;
@@ -171,13 +176,16 @@ export class KanbanView extends HermesView {
     if (!quiet) this.force = true;
     // After a failed read a poll tick skips two turns: 60 s between tries instead of 20 s.
     else if (!this.force && this.backoff > 0) { this.backoff--; return; }
+    // Live mode watches the token itself, so a poll tick has nothing to probe.
+    else if (!this.force && this.live) return;
     return super.reload(quiet);
   }
 
   override async onOpen(): Promise<void> {
     await super.onOpen();
     this.contentEl.addClass("hm-k-view");
-    // ponytail: D29, the board token misses heartbeat and claim changes; they wait for a forced read (open, board switch, window focus, Refresh, a write).
+    // ponytail: D29, the board token (live mode reads it every second) misses heartbeat and claim changes; they wait for the next
+    // event or a forced read (open, board switch, window focus, Refresh, a write).
     this.registerDomEvent(this.contentEl.win, "focus", () => {
       if (!this.contentEl.isShown() || this.busy()) return;
       this.force = true;
@@ -197,6 +205,42 @@ export class KanbanView extends HermesView {
     this.registerInterval(window.setInterval(() => {
       for (const el of Array.from(this.contentEl.querySelectorAll<HTMLElement>("[data-at]"))) el.setText(relative(Number(el.dataset.at)));
     }, 60_000));
+    // ponytail: live mode asks once a second, one sqlite3 run on the host each time; the web dashboard tails task_events every 0.3 s.
+    this.registerInterval(window.setInterval(() => this.pulse(), 1_000));
+    this.register(() => this.stopLive());
+  }
+
+  /** Each second, one live session per shown board. While it answers, poll ticks skip their probe; once it is down they take
+   *  over again, and live mode retries a minute after its last start. */
+  private pulse(): void {
+    const slug = this.alias && this.host.board(this.alias), key = `${this.alias}|${slug}`;
+    const shown = !!slug && !this.closed && !this.contentEl.doc.hidden && this.contentEl.isShown();
+    // Hidden or on another host or board: stop, and start at once when shown again.
+    if (this.live && (!shown || key !== this.tried.key)) { this.stopLive(); this.tried.at = 0; }
+    if (!shown) return;
+    if (!this.live) {
+      if (key === this.tried.key && Date.now() - this.tried.at < 60_000) return;
+      this.tried = { key, at: Date.now() };
+      try { this.live = this.host.kanban.watch(this.alias, slug, () => !!this.prefs[slug]?.archived, () => this.moved()); } catch { return; }
+    }
+    if (!this.live.tick()) this.stopLive();
+  }
+
+  private stopLive(): void {
+    this.live?.stop();
+    this.live = null;
+  }
+
+  /** A live answer differs from the cached read's token: one forced read after 250 ms of quiet. Mid-read it does nothing, since
+   *  the next tick compares against what that read cached, so a change the read missed still gets its single follow-up. */
+  private moved(): void {
+    window.clearTimeout(this.liveTimer);
+    if (this.inflight) return;
+    this.liveTimer = window.setTimeout(() => {
+      if (this.closed || this.inflight || this.backoff > 0 || this.busy()) return;
+      this.force = true;
+      void this.reload(true);
+    }, 250);
   }
 
   protected async pull(alias: string): Promise<string | null> {

@@ -162,7 +162,7 @@ export class HermesChat {
       } });
       return { ...run, done: run.done.then(result => ({ ...result, exitCode: result.exitCode === null ? null : status ?? result.exitCode })) };
     } catch (error) {
-      return { stop() {}, done: Promise.resolve({ exitCode: null, stderrTail: error instanceof Error ? error.message : String(error), refused: true }) };
+      return { stop() {}, write() {}, done: Promise.resolve({ exitCode: null, stderrTail: error instanceof Error ? error.message : String(error), refused: true }) };
     }
   }
 }
