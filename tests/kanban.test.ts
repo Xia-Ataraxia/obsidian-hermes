@@ -65,6 +65,8 @@ test("verb keeps ids to safe tokens and free text in base64", () => {
   expect(verb({ verb: "complete", id: "t_1", summary: "s", force: true })).toBe(`complete --summary=${b64Arg("s")} --force -- t_1`);
   expect(verb({ verb: "block", id: "t_1", kind: "needs_input", reason: "-x" })).toBe(`block --kind=needs_input -- t_1 ${b64Arg("-x")}`);
   expect(verb({ verb: "purge", id: "t_1" })).toBe("archive --rm=t_1");
+  expect(verb({ verb: "attach-rm", id: "t_1", attachment: 3 })).toBe("attach-rm -- 3");
+  expect(() => verb({ verb: "attach-rm", id: "t_1", attachment: 1.5 })).toThrow();
   expect(verb({ verb: "set-model", id: "t_1", model: null })).toBe("set-model -- t_1 none");
   expect(() => verb({ verb: "promote", id: "t_1; rm -rf ~" })).toThrow();
   expect(() => verb({ verb: "edit", id: "t_1", priority: 1.5 })).toThrow();

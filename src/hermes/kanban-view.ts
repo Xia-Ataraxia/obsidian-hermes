@@ -137,7 +137,7 @@ export class KanbanView extends HermesView {
     else if (this.pending && this.read?.board === this.pending.board) {
       const { task } = this.pending;
       this.pending = null;
-      this.open(task);
+      this.openTask(task);
     }
   }
 
@@ -213,7 +213,7 @@ export class KanbanView extends HermesView {
     if (this.pending) {
       const p = this.pending;
       this.pending = null;
-      if (p.board === r.board) this.open(p.task);
+      if (p.board === r.board) this.openTask(p.task);
     }
     return null;
   }
@@ -261,7 +261,8 @@ export class KanbanView extends HermesView {
     return null;
   }
 
-  private open(id: string, focus?: Focus): void {
+  // Not `open`: Obsidian mounts a view through View.open(containerEl), and shadowing it leaves the tab blank.
+  private openTask(id: string, focus?: Focus): void {
     if (this.drawer?.id === id) {
       this.drawer.show(focus);
       return;
@@ -287,7 +288,7 @@ export class KanbanView extends HermesView {
       profiles: () => this.read?.profiles ?? [],
       diagnostics: id => this.diags[id] ?? [],
       write: v => this.write(v),
-      open: (id, focus) => this.open(id, focus),
+      open: (id, focus) => this.openTask(id, focus),
       close: () => { this.closeDrawer(); this.render(); },
     };
   }
@@ -566,7 +567,7 @@ export class KanbanView extends HermesView {
           const line = task.createDiv("hm-k-attention-line");
           line.createSpan({ cls: "hm-k-id hm-code", text: c.id });
           line.createSpan({ text: c.title });
-          action(line, "Open", () => this.open(c.id, "diagnostics"));
+          action(line, "Open", () => this.openTask(c.id, "diagnostics"));
           for (const d of [...(this.diags[c.id] ?? [])].sort((a, b) => severityRank(b.severity) - severityRank(a.severity))) diagCard(task, host, c, d);
         }
       }
@@ -603,8 +604,9 @@ export class KanbanView extends HermesView {
       const auto = all.length === 0;
       if (pref.folds?.[s] ?? auto) {
         col.addClass("is-folded");
-        const rail = col.createEl("button", { cls: "hm-k-rail", attr: { type: "button", "aria-label": `Expand ${label}` } });
-        setTooltip(rail, "Expand column");
+        const rail = col.createEl("button", { cls: "hm-k-rail", attr: { type: "button" } });
+        // setTooltip owns aria-label, so the column name goes through it.
+        setTooltip(rail, `Expand ${label}`);
         icon(rail, COLUMNS[s].icon);
         rail.createSpan({ cls: "hm-k-rail-name", text: label });
         rail.createSpan({ cls: "hm-count", text: String(all.length) });
@@ -746,8 +748,9 @@ export class KanbanView extends HermesView {
     el.toggleClass("is-open", this.drawer?.id === c.id);
 
     const top = el.createDiv("hm-k-card-top");
-    const check = top.createEl("input", { cls: "hm-k-check", attr: { type: "checkbox", "aria-label": `Select task ${c.id}` } });
-    setTooltip(check, "Select for bulk actions");
+    const check = top.createEl("input", { cls: "hm-k-check", attr: { type: "checkbox" } });
+    // setTooltip owns aria-label, so the task id goes through it.
+    setTooltip(check, `Select ${c.id} for bulk actions`);
     check.checked = this.selected.has(c.id);
     check.addEventListener("click", event => {
       event.stopPropagation();
@@ -766,7 +769,7 @@ export class KanbanView extends HermesView {
       const sev = diags.map(d => d.severity).reduce((a, b) => severityRank(b) > severityRank(a) ? b : a);
       iconButton(top, severityIcon(sev), `${diags.length} active diagnostic${plural(diags.length)} (severity: ${sev}). Click to open for details.`, event => {
         event.stopPropagation();
-        this.open(c.id, "diagnostics");
+        this.openTask(c.id, "diagnostics");
       }, `hm-k-warn is-${sev}`);
     }
     if (c.priority) setTooltip(top.createSpan({ cls: "hm-k-prio", text: `P${c.priority}` }), `Priority ${c.priority}. Higher runs first.`);
@@ -803,7 +806,7 @@ export class KanbanView extends HermesView {
     el.addEventListener("keydown", event => {
       if (event.target !== el || (event.key !== "Enter" && event.key !== " ")) return;
       event.preventDefault();
-      this.open(c.id);
+      this.openTask(c.id);
     });
     el.addEventListener("contextmenu", event => {
       event.preventDefault();
@@ -847,7 +850,7 @@ export class KanbanView extends HermesView {
       this.render();
       return;
     }
-    this.open(id);
+    this.openTask(id);
   }
 
   /** Columns that take at least one dragged card light up; columns that take none are locked. */
@@ -869,7 +872,7 @@ export class KanbanView extends HermesView {
 
   private menu(c: Card): Menu {
     const menu = new Menu();
-    menu.addItem(i => i.setTitle("Open").setIcon("panel-right-open").onClick(() => this.open(c.id)));
+    menu.addItem(i => i.setTitle("Open").setIcon("panel-right-open").onClick(() => this.openTask(c.id)));
     const picked = this.selected.has(c.id);
     menu.addItem(i => i.setTitle(picked ? "Deselect" : "Select").setIcon(picked ? "x" : "check").onClick(() => {
       if (!this.selected.delete(c.id)) this.selected.add(c.id);
