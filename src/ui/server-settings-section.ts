@@ -21,9 +21,9 @@ function renderAddRow(parent: HTMLElement, options: ServerSectionOptions): void 
   let pending = "";
   const row = new Setting(parent)
     .setName("Add SSH host alias")
-    .setDesc("An alias defined in ~/.ssh/config with key authentication already configured.")
+    .setDesc("A host alias from your SSH config, with key authentication already set up.")
     .addText((text) => {
-      text.setPlaceholder("m1-file").onChange((value) => {
+      text.setPlaceholder("SSH alias").onChange((value) => {
         pending = value.trim();
       });
     })

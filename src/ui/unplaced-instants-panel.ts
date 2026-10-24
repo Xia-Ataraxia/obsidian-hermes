@@ -21,7 +21,7 @@ export function renderUnplacedPanel(
   panel.createEl("h4", { text: `Not placed (${unplaced.length})`, cls: "hcv-unplaced-title" });
   panel.createEl("p", {
     cls: "hcv-unplaced-note",
-    text: "These instants are shown exactly as Hermes stored them; they are not positioned on the calendar.",
+    text: "These times are shown exactly as stored and are not placed on the calendar.",
   });
 
   const list = panel.createEl("ul", { cls: "hcv-unplaced-list" });
