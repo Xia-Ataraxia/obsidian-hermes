@@ -1,6 +1,6 @@
 {
   "name": "hermes-control-center",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Obsidian plugin to monitor and manage remote Hermes Agent profiles over SSH.",
   "license": "MIT",
@@ -8,13 +8,20 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "@types/node": "^22.10.2",
-    "esbuild": "0.24.2",
-    "obsidian": "^1.7.2",
-    "typescript": "^5.7.2"
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.4.2",
+    "obsidian": "^1.14.4",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.72.0"
+  },
+  "overrides": {
+    "moment": "^2.31.0"
   }
 }
