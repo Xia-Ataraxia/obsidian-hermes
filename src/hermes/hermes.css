@@ -774,6 +774,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-chip[aria-pressed="true"] .hm-avatar { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
 .hm-chat-chip.is-streaming .hm-avatar { box-shadow: 0 0 0 0 color-mix(in srgb, var(--interactive-accent) 45%, transparent); animation: hm-pulse 2.2s ease-out infinite; }
 .hm-chat-head { display: flex; flex: none; align-items: center; gap: 6px; min-height: 36px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--hm-line); }
+.hm-chat-head:empty { display: none; }
 .hm-chat-head .hm-gw { margin-left: 0; }
 .hm-chat-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .hm-chat-log { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-x: hidden; overflow-y: auto; }
