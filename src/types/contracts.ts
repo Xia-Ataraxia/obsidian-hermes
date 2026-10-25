@@ -43,6 +43,8 @@ export interface ServerSectionOptions {
   onEdit(alias: string): void;
   onCheck(alias: string): void;
   onRemove(alias: string): void;
+  onKanban(alias: string): void;
+  onProfiles(alias: string): void;
 }
 
 /** Outcome of a connection target replacement; `changed: false` means the target was identical. */
