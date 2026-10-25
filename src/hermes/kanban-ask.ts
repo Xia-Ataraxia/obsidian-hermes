@@ -65,7 +65,9 @@ class AskModal extends Modal {
     const a = this.ask, fields = a.fields ??= [];
     this.modalEl.addClass("hm-modal");
     this.setTitle(a.title);
-    const form = this.contentEl.createEl("form", { cls: fields.length > 4 ? "hm-form is-grid" : "hm-form" });
+    const grid = fields.length > 4;
+    this.modalEl.toggleClass("is-grid", grid);
+    const form = this.contentEl.createEl("form", { cls: grid ? "hm-form is-grid" : "hm-form" });
     const lead = a.text ? form.createEl("p", { cls: "hm-k-ask-text" }) : null;
     const inputs = new Map<string, Control>();
     const values = (): Record<string, string> => Object.fromEntries([...inputs].map(([key, el]) => [key, el.type === "checkbox" ? (el.checked ? "on" : "") : el.value.trim()]));
