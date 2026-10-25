@@ -44,6 +44,7 @@ export class ChatHud {
     this.reading = false;
     for (const row of this.rows.values()) row.el.remove();
     this.rows.clear();
+    this.el.removeClass("is-offline");
     this.render();
   }
 
