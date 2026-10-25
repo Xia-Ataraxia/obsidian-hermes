@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildHud, elapsed, hudScript, LINGER, parseHud, parseProcs } from "../src/hermes/hud";
 import { HermesChat } from "../src/hermes/chat";
-import { SendQueue, type Queued } from "../src/hermes/send-queue";
+import { SendQueue, plainWhy, type Queued } from "../src/hermes/send-queue";
 import { askFor, invocationOf, matchSkills, slashSkill, userInvocation } from "../src/hermes/skills-chat";
 import { parseSections, type Sections } from "../src/hermes/remote";
 import type { Activity, Session, Subagent } from "../src/hermes/activity";
@@ -110,4 +110,9 @@ test("SendQueue keeps order, holds while paused, retries a requeued message firs
   q.paused = true;
   q.clear();
   expect([q.list.length, q.paused]).toEqual([0, false]);
+});
+
+test("plainWhy hides raw errors behind plain copy", () => {
+  expect(plainWhy("ssh: connection timed out")).toBe("Can't reach Hermes");
+  expect(plainWhy("Exit 1")).toBe("Hermes stopped with an error");
 });

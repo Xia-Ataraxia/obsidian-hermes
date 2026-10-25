@@ -301,17 +301,17 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  width: calc(min(440px, 92%) + 16px);
-  padding-right: 16px;
+  width: calc(min(440px, 92%) + 40px);
+  padding-right: 40px;
   border-left: 1px solid var(--hm-line);
   background: var(--background-primary);
   box-shadow: var(--shadow-l);
   transform: translateX(104%);
   transition: transform 0.2s ease-in;
 }
-/* The extra 16px past the edge hides the spring's overshoot. */
-.hm-drawer { right: -16px; }
-.hm-drawer.is-open { transform: none; transition: transform 0.45s var(--hm-spring); }
+/* The extra 40px past the edge hides the spring's overshoot (about 6% of the width). */
+.hm-drawer { right: -40px; }
+.hm-drawer.is-open { transform: none; transition: transform 0.45s cubic-bezier(0.22, 1.2, 0.36, 1); }
 
 .hm-drawer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 16px 12px; }
 .hm-drawer-title { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
@@ -805,7 +805,12 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-skill-state.is-failed { color: var(--hm-bad); animation: hm-pop 0.4s var(--hm-spring); }
 .hm-skill-text { color: var(--text-muted); font-size: 12.5px; white-space: pre-wrap; }
 @keyframes hm-pop { from { opacity: 0; transform: scale(0.4); } }
-.hm-skill-item .suggestion-note { white-space: normal; }
+/* The popup is mounted on the body, outside .hm-view, so only Obsidian's own variables apply here. */
+.hm-skill-item { display: flex; flex-direction: column; gap: 2px; padding: var(--size-4-2) var(--size-4-3); }
+.hm-skill-item .suggestion-content { flex: none; }
+.hm-skill-item .suggestion-title { color: var(--text-normal); font-family: var(--font-monospace); font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
+.hm-skill-item .suggestion-note { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: 1.4; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.hm-skill-item.is-selected .suggestion-title { color: var(--text-accent); }
 
 .hm-hud { flex: none; border-top: 1px solid var(--hm-line); font-size: 11.5px; }
 .hm-hud-bar { display: flex; align-items: center; gap: 6px; padding: 5px 12px; color: var(--text-faint); transition: color var(--anim-duration-moderate) var(--anim-motion-smooth); }
@@ -852,17 +857,18 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-queue-mark .svg-icon { width: 13px; height: 13px; }
 .hm-queue-title { flex: none; white-space: nowrap; }
 .hm-queue-gap { flex: 1; }
-.hm-queue-why { overflow: hidden; color: var(--hm-bad); text-overflow: ellipsis; white-space: nowrap; }
+.hm-queue-why { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
 .hm-queue.is-paused .hm-queue-mark { color: var(--hm-warn); }
 .hm-queue-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; padding-bottom: 6px; overflow: hidden auto; }
 .hm-queue-chip { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 6px; border: 1px dashed var(--hm-line); border-radius: 8px; background: var(--hm-soft); color: var(--text-muted); font-size: 12px; animation: hm-rise 0.4s var(--hm-spring); }
+.hm-queue-chip { transition: border-color 0.3s ease; }
 .hm-queue-chip.is-next { border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--hm-line)); }
 .hm-queue-pos { display: grid; flex: none; min-width: 16px; height: 16px; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--text-normal) 8%, transparent); font-size: 10px; font-variant-numeric: tabular-nums; }
 .hm-queue-chip.is-next .hm-queue-pos { background: color-mix(in srgb, var(--interactive-accent) 18%, transparent); color: var(--text-accent); }
 .hm-queue-skill { flex: none; color: var(--text-normal); font-family: var(--font-monospace); font-size: 11.5px; font-weight: 600; }
 .hm-queue-skill:empty { display: none; }
 .hm-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hm-queue-btn { opacity: 0.55; transition: opacity 0.15s ease; }
+.hm-queue-btn { opacity: 0.7; transition: opacity 0.15s ease; }
 .hm-queue-chip:hover .hm-queue-btn, .hm-queue-btn:hover, .hm-queue-btn:focus-visible { opacity: 1; }
 .hm-queue-chip.is-sent { animation: hm-dispatch 0.45s var(--anim-motion-smooth) forwards; pointer-events: none; }
 .hm-queue-chip.is-gone { animation: hm-sink var(--anim-duration-moderate) var(--anim-motion-smooth) forwards; pointer-events: none; }

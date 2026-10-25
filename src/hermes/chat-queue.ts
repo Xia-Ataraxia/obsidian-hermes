@@ -1,4 +1,4 @@
-import type { Queued } from "./send-queue";
+import { plainWhy, type Queued } from "./send-queue";
 import { icon, iconButton } from "./ui";
 
 export interface QueueActions {
@@ -74,7 +74,7 @@ export class QueueBar {
     if (!count) return;
     icon(this.head, paused ? "pause" : "list-plus", "hm-icon hm-queue-mark");
     this.head.createSpan({ cls: "hm-queue-title", text: paused ? `Paused · ${count}` : `Queued · ${count}` });
-    if (paused && error) this.head.createSpan({ cls: "hm-queue-why", text: error });
+    if (paused && error) this.head.createSpan({ cls: "hm-queue-why", text: plainWhy(error), attr: { title: error, "aria-label": error } });
     this.head.createSpan("hm-queue-gap");
     if (paused) iconButton(this.head, "rotate-cw", error ? "Retry" : "Resume", () => this.actions.resume(), "hm-queue-btn");
     iconButton(this.head, "trash-2", "Clear queue", () => this.actions.clear(), "hm-queue-btn");

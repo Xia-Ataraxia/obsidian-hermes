@@ -45,3 +45,9 @@ export class SendQueue {
     this.paused = false;
   }
 }
+
+/** The raw failure stays in the tooltip; the header says what it means. */
+export function plainWhy(error: string): string {
+  if (/ssh|resolve|timed out|refused|unreachable|connection|host/i.test(error)) return "Can't reach Hermes";
+  return "Hermes stopped with an error";
+}
