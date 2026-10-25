@@ -18,4 +18,4 @@ Monitor and manage remote Hermes Agent profiles over SSH (manifest id `hermes-co
 
 - Never persist Hermes job or output bodies; only parsed projections go to disk (job names only when `persistJobNames` is on).
 - No `!important` in CSS: scope under `.hm-view` instead of overriding Obsidian button defaults.
-- Oversized modules (>500 LOC) still pending a split: `kanban-view`, `kanban-drawer`, `inspector`, `kanban`, `profiles-view`.
+- Big views are split by responsibility: `KanbanView`, `ProfileModal` and `ProfilesView` keep state and lifecycle, and their render panes live in sibling modules as `this`-typed functions (`kanban-board`, `kanban-card`, `inspector-skills`, `profiles-draw`, ...) that the class methods delegate to. Class members are therefore not `private`.
