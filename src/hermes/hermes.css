@@ -1,6 +1,6 @@
 /* ═════════════ Hermes views ═════════════ */
 
-.hm-view {
+.hm-view.hm-view {
   --hm-gap: 8px;
   --hm-radius: 12px;
   --hm-line: var(--background-modifier-border);
@@ -13,7 +13,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 0 !important;
+  padding: 0;
   overflow: hidden;
   background: var(--background-primary);
 }
@@ -23,7 +23,7 @@
 .hm-muted { color: var(--text-faint); }
 .hm-pad { padding: 16px; }
 .hm-pad-x { padding: 0 16px; }
-.hm-push { margin-left: auto !important; }
+.hm-view .hm-push { margin-left: auto; }
 .hm-code { font-family: var(--font-monospace); font-size: 11px; }
 .hm-count {
   min-width: 18px;
@@ -109,7 +109,7 @@
   color: var(--text-faint);
 }
 .hm-search:focus-within { border-color: var(--interactive-accent); }
-.hm-search input { flex: 1; min-width: 0; height: 28px; padding: 0; border: 0; background: none; box-shadow: none !important; }
+.hm-view .hm-search input, .hm-view .hm-search input:focus { flex: 1; min-width: 0; height: 28px; padding: 0; border: 0; background: none; box-shadow: none; }
 
 /* ───────────── toolbar ───────────── */
 
@@ -269,13 +269,13 @@
   cursor: default;
 }
 .hm-controls { bottom: 14px; left: 14px; }
-.hm-zoom {
+.hm-view button.hm-zoom {
   min-width: 48px;
   height: 26px;
-  padding: 0 6px !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  box-shadow: none;
   color: var(--text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -316,21 +316,21 @@
 .hm-drawer-head .hm-push { align-self: flex-start; }
 
 .hm-tabs { display: flex; flex: none; flex-direction: column; gap: 2px; width: 180px; padding: 12px 8px; border-right: 1px solid var(--hm-line); overflow-y: auto; }
-.hm-tab {
+.hm-view button.hm-tab {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 10px !important;
-  border: 0 !important;
-  border-radius: 6px !important;
-  background: none !important;
-  box-shadow: none !important;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
   color: var(--text-muted);
 }
 .hm-tab svg { width: 16px; height: 16px; }
-.hm-tab:hover, .hm-tab.is-active { background: var(--background-modifier-hover) !important; color: var(--text-normal); }
+.hm-view .hm-tab:hover, .hm-view .hm-tab.is-active { background: var(--background-modifier-hover); color: var(--text-normal); }
 .hm-tab-label { flex: 1; text-align: left; }
 .hm-tab-count { color: var(--text-faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 
@@ -736,7 +736,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-notice-row:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-view *, .hm-view *::before, .hm-view *::after { animation: none !important; transition: none !important; }
+  .hm-view.hm-view *, .hm-view.hm-view *::before, .hm-view.hm-view *::after { animation: none; transition: none; }
 }
 
 /* ═════════════ Chat ═════════════ */
@@ -820,5 +820,5 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-act .hm-chip.is-warn { --c: var(--hm-warn); }
 .hm-act .hm-icon.is-warn { color: var(--hm-warn); }
 @media (prefers-reduced-motion: reduce) {
-  .hm-act *, .hm-act *::before { animation: none !important; transition: none !important; }
+  .hm-act.hm-act *, .hm-act.hm-act *::before { animation: none; transition: none; }
 }

@@ -92,13 +92,13 @@ Download `main.js`, `manifest.json` and `styles.css` from the [latest release](h
 
 ```sh
 bun install
-bun run build      # writes main.js and styles.css
+bun run build      # writes dist/main.js, manifest.json and styles.css
 bun run typecheck
 bun run lint       # the same rules the Obsidian Community directory checks
 bun test
 ```
 
-Releases are built by GitHub Actions with `npm ci` and `npm run build`; both paths produce the same `main.js`. Bug reports and ideas are welcome in [issues](https://github.com/Xia-Ataraxia/obsidian-hermes/issues).
+Releases are built by GitHub Actions from `bun run ci`. Bug reports and ideas are welcome in [issues](https://github.com/Xia-Ataraxia/obsidian-hermes/issues).
 
 ## License
 

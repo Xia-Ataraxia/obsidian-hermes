@@ -1,29 +1,10 @@
 name: CI
-
 on:
-  push:
   pull_request:
-
+  push:
+    branches: [main]
 permissions:
   contents: read
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install
-      - run: bun run typecheck
-      - run: bun run lint
-      - run: bun run build
-      - run: bun test
-      - uses: actions/upload-artifact@v4
-        with:
-          name: plugin
-          path: |
-            main.js
-            styles.css
-            manifest.json
+  ci:
+    uses: GoBeromsu/obsidian-boiler-template/.github/workflows/plugin-ci.yml@main
