@@ -64,7 +64,8 @@
   transform: translateY(-50%);
 }
 
-.hcv-filter-search {
+.hcv-search-control .hcv-filter-search {
+  /* Two classes: Obsidian's input[type="search"] padding outranks one. */
   padding-inline-start: calc(var(--icon-xs) + var(--size-4-2));
 }
 
