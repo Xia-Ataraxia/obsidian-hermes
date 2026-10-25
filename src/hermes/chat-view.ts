@@ -1,8 +1,11 @@
 import { Component, Menu, Notice, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { keepChat } from "./cache";
+import { ChatHud } from "./chat-hud";
+import { SkillSuggest, skillBlock } from "./chat-skills";
 import { reduce, SESSION_ID, sessionFrom, type ChatState, type Tool, type Turn, type Usage } from "./chat";
 import { renderSafe } from "./markdown";
 import { safeToken } from "./remote";
+import { askFor, slashSkill, userInvocation, type Pick } from "./skills-chat";
 import { avatar, compact, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
 
 export const CHAT_VIEW = "hermes-chat";
@@ -38,6 +41,9 @@ export class ChatView extends HermesView {
   private live: Text | null = null;
   /** A read is in flight (it never throws, so the flag always clears). */
   private pulling = false;
+  private hud!: ChatHud;
+  private suggest!: SkillSuggest;
+  private hudKey = "";
 
   constructor(leaf: WorkspaceLeaf, host: HermesHost) {
     super(leaf, host, 30_000);
@@ -86,12 +92,15 @@ export class ChatView extends HermesView {
     this.body.before(this.head);
     this.body.addClass("hm-chat-log");
     this.body.setAttrs({ role: "log", "aria-live": "polite" });
+    this.hud = new ChatHud(this.contentEl, () => this.host.chat.hud(this.alias, this.profile), () => !!this.alias && this.contentEl.isShown());
+    this.registerInterval(this.contentEl.win.setInterval(() => this.hud.tick(), 1000));
     // Built once: a repaint never touches the draft, the focus or an IME composition.
     const composer = this.contentEl.createDiv("hm-chat-composer");
     this.input = composer.createEl("textarea", { attr: { rows: "1", "aria-label": "Message" } });
     this.input.addEventListener("input", () => { this.state(this.key()).draft = this.input.value; });
+    this.suggest = new SkillSuggest(this.app, this.input, () => this.skills(), text => { this.state(this.key()).draft = text; });
     this.input.addEventListener("keydown", event => {
-      if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing || this.suggest.active) return;
       event.preventDefault();
       this.send();
     });
@@ -179,7 +188,7 @@ export class ChatView extends HermesView {
       const turn = s.turn, after = turn?.after ?? null;
       if (turn?.done && after !== null && (turn.code === 0 || turn.code === null) && s.rows.some(row => row.id > after && row.role === "assistant" && row.text)) {
         const user = s.rows.find(row => row.id > after && row.role === "user");
-        if (user && turn.usage) s.extras[user.id] = { tools: turn.tools, usage: turn.usage };
+        if (user && turn.usage) s.extras[user.id] = { tools: turn.tools, usage: turn.usage, skill: turn.skill };
         s.turn = null;
       }
     }
@@ -191,15 +200,31 @@ export class ChatView extends HermesView {
     return null;
   }
 
+  /** The enabled skills of the shown profile, read once per profile and cached by the inspector. */
+  private async skills(): Promise<Pick[]> {
+    const detail = this.host.inspect.cached(this.alias, this.profile) ?? await this.host.inspect.detail(this.alias, this.profile);
+    return typeof detail === "string" ? [] : detail.skills.filter(skill => skill.enabled);
+  }
+
   private send(): void {
-    const text = this.input.value.trim(), alias = this.alias, profile = this.profile, key = this.key(), s = this.state(key);
+    const text = this.input.value.trim();
+    if (!text.startsWith("/")) { this.submit(text, text); return; }
+    void this.skills().then(skills => {
+      const call = slashSkill(text, skills);
+      if (call) this.submit(text, call.instruction || askFor(call.name), call.name);
+      else new Notice("Unknown skill. Other slash commands only work in the terminal");
+    });
+  }
+
+  /** `draft` is what was typed (handed back when the turn never started), `query` what the CLI is asked, `skill` the one to preload. */
+  private submit(draft: string, query: string, skill = ""): void {
+    const text = query, alias = this.alias, profile = this.profile, key = this.key(), s = this.state(key);
     if (!text || !alias || this.streams.has(key)) return;
-    if (text.startsWith("/")) { new Notice("Slash commands only work in the terminal"); return; }
     // Twice base64-encoded it must stay under Linux's 128 KB limit for one ssh argument.
     if (Buffer.byteLength(text) > 32 * 1024) { new Notice("Message is too long (over 32,768 bytes)"); return; }
     // Rows loaded for this thread bound the turn from below; otherwise wait for the server's `after` line.
     const after = this.loaded.get(key) === s.sid ? Math.max(0, ...s.rows.map(row => row.id)) : null;
-    const turn: Turn = { user: text, after, sid: s.sid, code: null, text: "", tools: [], usage: null, error: null, done: false };
+    const turn: Turn = { user: text, after, sid: s.sid, code: null, text: "", tools: [], usage: null, error: null, done: false, skill: skill || undefined };
     s.turn = turn;
     s.draft = this.input.value = "";
     let user = false, seen = false, frame = 0;
@@ -225,7 +250,7 @@ export class ChatView extends HermesView {
       turn.sid = s.sid = sid;
       this.app.workspace.requestSaveLayout();
       if (key === this.key()) this.render();
-    });
+    }, skill);
     this.streams.set(key, () => { user = true; handle.stop(); });
     this.render();
     void handle.done.then(exit => {
@@ -245,8 +270,8 @@ export class ChatView extends HermesView {
       // No `Session:` line means the CLI never submitted it; after a refusal or a failed exit, hand the text back
       // rather than lose it. A stop leaves the "Stopped waiting" note instead.
       if (!seen && (turn.refused || (code !== null && code !== 0)) && !s.draft) {
-        s.draft = text;
-        if (key === this.key()) this.input.value = text;
+        s.draft = draft;
+        if (key === this.key()) this.input.value = draft;
       }
       this.repaint(); // also when off screen: the chip stops pulsing
       // A read already in flight may predate the reply; pull once more after it, or the turn waits for the next poll.
@@ -309,6 +334,11 @@ export class ChatView extends HermesView {
       recent.disabled = streaming;
     }
 
+    if (key !== this.hudKey) {
+      this.hudKey = key;
+      this.hud.reset();
+      void this.hud.poll();
+    }
     this.renderLog(key, s);
   }
 
@@ -358,8 +388,8 @@ export class ChatView extends HermesView {
         if (row.role === "user") {
           flush();
           if (usage) this.foot(history, usage);
-          history.createDiv({ cls: "hm-chat-user", text: row.text });
-          const extra = s.extras[row.id];
+          const extra = s.extras[row.id], call = userInvocation(row.text, extra?.skill);
+          if (call) skillBlock(history, call); else history.createDiv({ cls: "hm-chat-user", text: row.text });
           if (extra) this.chips(history, extra.tools);
           usage = extra?.usage;
         } else {
@@ -377,7 +407,8 @@ export class ChatView extends HermesView {
       this.turnMd = this.addChild(new Component());
       this.live = null;
       if (turn) {
-        now.createDiv({ cls: "hm-chat-user", text: turn.user });
+        const call = userInvocation(turn.user, turn.skill);
+        if (call) skillBlock(now, call); else now.createDiv({ cls: "hm-chat-user", text: turn.user });
         this.chips(now, turn.tools);
         if (!turn.done) this.live = now.createDiv("hm-chat-live").appendChild(now.doc.createTextNode(turn.text));
         else if (turn.text) markdown(now, this.turnMd, turn.text);

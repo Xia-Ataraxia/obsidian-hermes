@@ -1,15 +1,17 @@
 import type { ControlCenterProcesses } from "../ui/control-center-processes";
 import type { SshReadOnlyAdapter } from "../ui/ssh-read-only-adapter";
 import { profileDir } from "./data";
+import { hudScript, parseHud, type Hud } from "./hud";
 import { json, runScript, safeToken, shellCommand, STATUS } from "./remote";
+import { SKILL_NAME } from "./skills-chat";
 
 /* Plain JSON-serialisable state, so chunk 5 can persist it as is. */
 interface Thread { id: string; source: string; title: string; at: number }
 interface Row { id: number; role: "user" | "assistant"; at: number; text: string; tools: string | null }
 export interface Tool { id: string; name: string; input: string; output: string | null; ms: number | null; error: boolean }
 export interface Usage { in: number; out: number; ms: number }
-export interface Turn { user: string; after: number | null; sid: string; code: number | null; text: string; tools: Tool[]; usage: Usage | null; error: string | null; done: boolean; refused?: boolean }
-export interface ChatState { sid: string; threads: Thread[]; rows: Row[]; draft: string; turn: Turn | null; extras: Record<number, { tools: Tool[]; usage: Usage }> }
+export interface Turn { user: string; after: number | null; sid: string; code: number | null; text: string; tools: Tool[]; usage: Usage | null; error: string | null; done: boolean; refused?: boolean; skill?: string | undefined }
+export interface ChatState { sid: string; threads: Thread[]; rows: Row[]; draft: string; turn: Turn | null; extras: Record<number, { tools: Tool[]; usage: Usage; skill?: string | undefined }> }
 
 /** `YYYYMMDD_HHMMSS_<hex>` and `local-<64 hex>`; never a leading "-", so it is safe in argv and SQL; never `latest` (the CLI's alias). */
 export const SESSION_ID = /^(?!latest$)[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/i;
@@ -110,8 +112,9 @@ fi
 }
 
 /** New thread without `sid`; resume takes no creation flag (`--source` included), or the CLI exits 2. */
-function sendScript(profile: string, sid: string, query: string): string {
+function sendScript(profile: string, sid: string, query: string, skill = ""): string {
   if (sid && !SESSION_ID.test(sid)) throw new Error(`Unsafe session id: ${sid}`);
+  if (skill && !SKILL_NAME.test(skill)) throw new Error(`Unsafe skill name: ${skill}`);
   const id = safeToken(profile);
   const db = `${profileDir(id)}/state.db`;
   // Exit 75 instead of letting the CLI auto-start an idle-exit gateway (gateway_client.py:288).
@@ -121,7 +124,7 @@ function sendScript(profile: string, sid: string, query: string): string {
   return LIVE + `live ${profileDir(id)} ${id} || { echo "Gateway is not running" >&2; exit 75; }
 n=$([ -f ${db} ] && echo 'SELECT max(id) FROM messages;' | ro ${db} 2>/dev/null)
 case $n in ''|*[!0-9]*) ;; *) echo '{"type":"after","id":'$n'}';; esac
-arg ${Buffer.from(query, "utf8").toString("base64")} | hermes -p ${id} chat${sid ? ` --resume ${sid}` : ""} --query-file - --format stream-json${sid ? "" : " --source cli"}
+arg ${Buffer.from(query, "utf8").toString("base64")} | hermes -p ${id} chat${sid ? ` --resume ${sid}` : ""}${skill ? ` --skills ${skill}` : ""} --query-file - --format stream-json${sid ? "" : " --source cli"}
 `;
 }
 
@@ -149,9 +152,9 @@ export class HermesChat {
 
   /** One turn as a stream; never throws (a refused alias, profile or sid comes back already done, with `refused`). The exit code is the
    *  script's own (its last `\x1e?<code>` line, see STATUS), since ssh exits 0; null when stopped. */
-  send(alias: string, profile: string, sid: string, query: string, onStdout: (line: string) => void, onStderr: (line: string) => void): ReturnType<ControlCenterProcesses["stream"]> {
+  send(alias: string, profile: string, sid: string, query: string, onStdout: (line: string) => void, onStderr: (line: string) => void, skill = ""): ReturnType<ControlCenterProcesses["stream"]> {
     try {
-      const argv = this.adapter.buildArgv(alias, { kind: "hermes", remoteCommand: shellCommand(sendScript(profile, sid, query)), byteCap: CAP, nulSeparated: false });
+      const argv = this.adapter.buildArgv(alias, { kind: "hermes", remoteCommand: shellCommand(sendScript(profile, sid, query, skill)), byteCap: CAP, nulSeparated: false });
       let status: number | null = null;
       const run = this.processes.stream("ssh", argv, { timeoutMs: 900_000, maxBytes: CAP, onStderr, onStdout: line => {
         const end = STATUS.exec(line);
@@ -163,6 +166,16 @@ export class HermesChat {
       return { ...run, done: run.done.then(result => ({ ...result, exitCode: result.exitCode === null ? null : status ?? result.exitCode })) };
     } catch (error) {
       return { stop() {}, write() {}, done: Promise.resolve({ exitCode: null, stderrTail: error instanceof Error ? error.message : String(error), refused: true }) };
+    }
+  }
+
+  /** What the profile is running now (see hud.ts); null when the read failed. Never throws. */
+  async hud(alias: string, profile: string): Promise<Hud | null> {
+    try {
+      const result = await runScript(this.adapter, alias, hudScript(safeToken(profile)));
+      return result.ok ? parseHud(result.sections) : null;
+    } catch {
+      return null;
     }
   }
 }
