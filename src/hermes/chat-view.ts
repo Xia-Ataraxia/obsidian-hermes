@@ -1,12 +1,15 @@
-import { Component, Menu, Notice, setIcon, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { Component, Menu, Notice, setTooltip, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import { keepChat } from "./cache";
 import { ChatHud } from "./chat-hud";
+import { chips, foot, outcome } from "./chat-parts";
+import { QueueBar } from "./chat-queue";
 import { SkillSuggest, skillBlock } from "./chat-skills";
-import { reduce, SESSION_ID, sessionFrom, type ChatState, type Tool, type Turn, type Usage } from "./chat";
+import { reduce, SESSION_ID, sessionFrom, type ChatState, type Turn, type Usage } from "./chat";
 import { renderSafe } from "./markdown";
 import { safeToken } from "./remote";
+import { SendQueue, type Queued } from "./send-queue";
 import { askFor, slashSkill, userInvocation, type Pick } from "./skills-chat";
-import { avatar, compact, HermesView, icon, iconButton, relative, stat, type HermesHost } from "./ui";
+import { avatar, HermesView, iconButton, relative, stat, type HermesHost } from "./ui";
 
 export const CHAT_VIEW = "hermes-chat";
 
@@ -44,6 +47,13 @@ export class ChatView extends HermesView {
   private hud!: ChatHud;
   private suggest!: SkillSuggest;
   private hudKey = "";
+  /** Messages waiting for the running turn, per `alias/profile`, so they outlive pane and profile switches. */
+  private readonly queues = new Map<string, SendQueue>();
+  /** Why a queue is paused ("" after a stop); a failure shows it next to Retry. */
+  private readonly pauseWhy = new Map<string, string>();
+  private queueBar!: QueueBar;
+  private queueKey = "";
+  private stopButton!: HTMLButtonElement;
 
   constructor(leaf: WorkspaceLeaf, host: HermesHost) {
     super(leaf, host, 30_000);
@@ -94,6 +104,12 @@ export class ChatView extends HermesView {
     this.body.setAttrs({ role: "log", "aria-live": "polite" });
     this.hud = new ChatHud(this.contentEl, () => this.host.chat.hud(this.alias, this.profile), () => !!this.alias && this.contentEl.isShown());
     this.registerInterval(this.contentEl.win.setInterval(() => this.hud.tick(), 1000));
+    this.queueBar = new QueueBar(this.contentEl, {
+      edit: id => this.editQueued(id),
+      remove: id => { this.queue(this.key()).remove(id); this.syncQueue(); },
+      resume: () => this.resume(),
+      clear: () => this.clearQueue(),
+    });
     // Built once: a repaint never touches the draft, the focus or an IME composition.
     const composer = this.contentEl.createDiv("hm-chat-composer");
     this.input = composer.createEl("textarea", { attr: { rows: "1", "aria-label": "Message" } });
@@ -104,10 +120,9 @@ export class ChatView extends HermesView {
       event.preventDefault();
       this.send();
     });
-    this.button = iconButton(composer, "send-horizontal", "Send", () => {
-      const stop = this.streams.get(this.key());
-      if (stop) stop(); else this.send();
-    });
+    this.stopButton = iconButton(composer, "square", STOP, () => this.streams.get(this.key())?.(), "hm-stop");
+    this.stopButton.hidden = true;
+    this.button = iconButton(composer, "send-horizontal", "Send", () => this.send());
     await opened;
   }
 
@@ -208,17 +223,74 @@ export class ChatView extends HermesView {
 
   private send(): void {
     const text = this.input.value.trim();
-    if (!text.startsWith("/")) { this.submit(text, text); return; }
+    if (!text.startsWith("/")) { this.dispatch(text, text); return; }
     void this.skills().then(skills => {
       const call = slashSkill(text, skills);
-      if (call) this.submit(text, call.instruction || askFor(call.name), call.name);
+      if (call) this.dispatch(text, call.instruction || askFor(call.name), call.name);
       else new Notice("Unknown skill. Other slash commands only work in the terminal");
     });
   }
 
+  private queue(key: string): SendQueue {
+    let queue = this.queues.get(key);
+    if (!queue) this.queues.set(key, queue = new SendQueue());
+    return queue;
+  }
+
+  /** Send now, or queue behind the running turn and whatever already waits (order is kept). */
+  private dispatch(draft: string, query: string, skill = ""): void {
+    const key = this.key(), queue = this.queue(key);
+    if (!query || !this.alias) return;
+    if (!this.streams.has(key) && !queue.list.length) { this.submit(draft, query, skill); return; }
+    // Twice base64-encoded it must stay under Linux's 128 KB limit for one ssh argument.
+    if (Buffer.byteLength(query) > 32 * 1024) { new Notice("Message is too long (over 32,768 bytes)"); return; }
+    queue.push({ alias: this.alias, profile: this.profile, draft, query, skill });
+    this.state(key).draft = this.input.value = "";
+    this.syncQueue();
+  }
+
+  /** Send the next queued message once nothing runs; a paused queue waits for Resume. */
+  private drain(key: string): void {
+    if (this.streams.has(key)) return;
+    const next = this.queues.get(key)?.take();
+    if (!next) return;
+    this.queueBar.markSent(next.id);
+    this.submit(next.draft, next.query, next.skill, next);
+  }
+
+  private resume(): void {
+    const key = this.key(), queue = this.queue(key);
+    queue.paused = false;
+    this.pauseWhy.delete(key);
+    this.drain(key);
+    this.syncQueue();
+  }
+
+  private clearQueue(): void {
+    this.queue(this.key()).clear();
+    this.pauseWhy.delete(this.key());
+    this.syncQueue();
+  }
+
+  /** Back into the composer, after whatever is already typed there. */
+  private editQueued(id: number): void {
+    const key = this.key(), item = this.queue(key).remove(id);
+    if (!item) return;
+    const s = this.state(key);
+    s.draft = this.input.value = s.draft ? `${s.draft}\n${item.draft}` : item.draft;
+    this.input.focus();
+    this.syncQueue();
+  }
+
+  private syncQueue(): void {
+    const key = this.key(), queue = this.queues.get(key);
+    if (key !== this.queueKey) { this.queueKey = key; this.queueBar.reset(); }
+    this.queueBar.sync(queue?.list ?? [], queue?.paused ?? false, this.pauseWhy.get(key) ?? "");
+  }
+
   /** `draft` is what was typed (handed back when the turn never started), `query` what the CLI is asked, `skill` the one to preload. */
-  private submit(draft: string, query: string, skill = ""): void {
-    const text = query, alias = this.alias, profile = this.profile, key = this.key(), s = this.state(key);
+  private submit(draft: string, query: string, skill = "", from?: Queued): void {
+    const text = query, alias = from?.alias ?? this.alias, profile = from?.profile ?? this.profile, key = `${alias}/${profile}`, s = this.state(key);
     if (!text || !alias || this.streams.has(key)) return;
     // Twice base64-encoded it must stay under Linux's 128 KB limit for one ssh argument.
     if (Buffer.byteLength(text) > 32 * 1024) { new Notice("Message is too long (over 32,768 bytes)"); return; }
@@ -226,7 +298,7 @@ export class ChatView extends HermesView {
     const after = this.loaded.get(key) === s.sid ? Math.max(0, ...s.rows.map(row => row.id)) : null;
     const turn: Turn = { user: text, after, sid: s.sid, code: null, text: "", tools: [], usage: null, error: null, done: false, skill: skill || undefined };
     s.turn = turn;
-    s.draft = this.input.value = "";
+    if (!from) s.draft = this.input.value = "";
     let user = false, seen = false, frame = 0;
     const handle = this.host.chat.send(alias, profile, s.sid, text, line => {
       const change = reduce(turn, line);
@@ -269,13 +341,23 @@ export class ChatView extends HermesView {
       this.app.workspace.requestSaveLayout();
       // No `Session:` line means the CLI never submitted it; after a refusal or a failed exit, hand the text back
       // rather than lose it. A stop leaves the "Stopped waiting" note instead.
-      if (!seen && (turn.refused || (code !== null && code !== 0)) && !s.draft) {
+      const unsent = !seen && (turn.refused || (code !== null && code !== 0));
+      if (unsent && !from && !s.draft) {
         s.draft = draft;
         if (key === this.key()) this.input.value = draft;
       }
+      // Anything but a clean reply holds the queue: a failed message goes back to its head, and Retry sends it again.
+      const queue = this.queue(key);
+      if (from && unsent) queue.requeue(from);
+      if (code !== 0 && (from || queue.list.length)) {
+        queue.paused = true;
+        this.pauseWhy.set(key, user && code === null ? "" : turn.error ?? `Exit ${code}`);
+      }
       this.repaint(); // also when off screen: the chip stops pulsing
       // A read already in flight may predate the reply; pull once more after it, or the turn waits for the next poll.
-      if (key === this.key()) void (this.pulling ? this.reload(true).then(() => this.reload(true)) : this.reload(true));
+      // The next queued message goes out only after, so its `after` bound counts this reply.
+      const settled = key !== this.key() ? Promise.resolve() : this.pulling ? this.reload(true).then(() => this.reload(true)) : this.reload(true);
+      void settled.then(() => { this.drain(key); this.syncQueue(); });
     });
   }
 
@@ -283,9 +365,7 @@ export class ChatView extends HermesView {
     const key = this.key(), s = this.state(key), streaming = this.streams.has(key);
     if (this.input.value !== s.draft) this.input.value = s.draft;
     this.input.placeholder = `Message ${this.profile}…`;
-    setIcon(this.button, streaming ? "square" : "send-horizontal");
-    this.button.setAttr("aria-label", streaming ? STOP : "Send");
-    setTooltip(this.button, streaming ? STOP : "Send");
+    this.stopButton.hidden = !streaming;
 
     // The chips and the head rebuild only when what they show changed, so a poll leaves the focus on them alone.
     const chipSig = JSON.stringify(this.profiles.map(({ id }) => [id, id === this.profile, this.streams.has(this.key(id))]));
@@ -339,6 +419,7 @@ export class ChatView extends HermesView {
       this.hud.reset();
       void this.hud.poll();
     }
+    this.syncQueue();
     this.renderLog(key, s);
   }
 
@@ -387,10 +468,10 @@ export class ChatView extends HermesView {
       for (const row of rows) {
         if (row.role === "user") {
           flush();
-          if (usage) this.foot(history, usage);
+          if (usage) foot(history, usage);
           const extra = s.extras[row.id], call = userInvocation(row.text, extra?.skill);
           if (call) skillBlock(history, call); else history.createDiv({ cls: "hm-chat-user", text: row.text });
-          if (extra) this.chips(history, extra.tools);
+          if (extra) chips(history, extra.tools);
           usage = extra?.usage;
         } else {
           if (row.text) { flush(); markdown(history, this.md, row.text); }
@@ -398,7 +479,7 @@ export class ChatView extends HermesView {
         }
       }
       flush();
-      if (usage) this.foot(history, usage);
+      if (usage) foot(history, usage);
     }
     if (turnSig !== this.turnSig) {
       this.turnSig = turnSig;
@@ -408,70 +489,17 @@ export class ChatView extends HermesView {
       this.live = null;
       if (turn) {
         const call = userInvocation(turn.user, turn.skill);
-        if (call) skillBlock(now, call); else now.createDiv({ cls: "hm-chat-user", text: turn.user });
-        this.chips(now, turn.tools);
+        if (call) skillBlock(now, call, !turn.done ? "running" : turn.code === 0 ? "done" : "failed"); else now.createDiv({ cls: "hm-chat-user", text: turn.user });
+        chips(now, turn.tools);
         if (!turn.done) this.live = now.createDiv("hm-chat-live").appendChild(now.doc.createTextNode(turn.text));
         else if (turn.text) markdown(now, this.turnMd, turn.text);
-        if (turn.done) this.outcome(now, turn, s);
-        if (turn.usage) this.foot(now, turn.usage);
+        if (turn.done) outcome(now, turn, s, this.profile);
+        if (turn.usage) foot(now, turn.usage);
       }
     }
     log.querySelectorAll<HTMLDetailsElement>("details.hm-chat-tool").forEach((d, i) => { d.open = open[i] ?? false; });
     log.scrollTop = stick ? log.scrollHeight : top;
     // Settled every time, so a failed render is never an unhandled rejection.
     void Promise.allSettled(renders).then(() => { if (stick && this.sig === sig && this.turnSig === turnSig) log.scrollTop = log.scrollHeight; });
-  }
-
-  /** How a finished turn ended, when that is not simply its reply. */
-  private outcome(log: HTMLElement, turn: Turn, s: ChatState): void {
-    switch (turn.code) {
-      case 0:
-        if (!turn.text) log.createDiv({ cls: "hm-chat-foot", text: "No reply" });
-        return;
-      case 130:
-        log.createDiv({ cls: "hm-chat-foot", text: "Interrupted" });
-        return;
-      case null:
-        // Refused before it ran (a closed connection, an unsafe id): nothing was sent, so this is an error.
-        if (turn.refused) log.createDiv({ cls: "hm-error", text: turn.error ?? "Not sent" });
-        else log.createDiv({ cls: "hm-chat-foot", text: `Stopped waiting. If the message was accepted, the reply will appear here.${turn.error ? ` (${turn.error})` : ""}` });
-        return;
-      case 3: {
-        // Approvals, "Input required" and Unknown execution blocks: only the TUI can answer them, so offer the way there.
-        const banner = log.createDiv("hm-chat-banner");
-        icon(banner, "triangle-alert");
-        banner.createDiv({ text: turn.error ?? "Input required" });
-        const sid = turn.sid || s.sid;
-        if (sid) {
-          iconButton(banner, "copy", "Copy resume command", () => {
-            void navigator.clipboard.writeText(`hermes -p ${this.profile} chat --resume ${sid}`).then(() => new Notice("Copied"));
-          });
-        }
-        return;
-      }
-      default:
-        log.createDiv({ cls: "hm-error", text: turn.error || `Exit ${turn.code}` });
-    }
-  }
-
-  private chips(log: HTMLElement, tools: Tool[]): void {
-    for (const tool of tools) {
-      const blocked = tool.output?.startsWith("BLOCKED:") ?? false;
-      const details = log.createEl("details", { cls: "hm-chat-tool" });
-      details.toggleClass("is-error", tool.error);
-      details.toggleClass("is-blocked", blocked);
-      const summary = details.createEl("summary");
-      icon(summary, "wrench");
-      summary.createSpan({ text: tool.name });
-      if (tool.ms !== null) summary.createSpan({ cls: "hm-muted", text: `${(tool.ms / 1000).toFixed(1)}s` });
-      if (blocked) setTooltip(summary, "Approval needed; denied in this panel. Use the TUI.");
-      if (tool.input) details.createEl("pre", { text: tool.input });
-      if (tool.output !== null) details.createEl("pre", { text: tool.output });
-    }
-  }
-
-  private foot(log: HTMLElement, usage: Usage): void {
-    const text = `${compact(usage.in)} → ${compact(usage.out)} · ${(usage.ms / 1000).toFixed(1)}s`;
-    setTooltip(log.createDiv({ cls: "hm-chat-foot", text }), `${usage.in.toLocaleString()} input tokens, ${usage.out.toLocaleString()} output tokens, ${usage.ms.toLocaleString()} ms`);
   }
 }

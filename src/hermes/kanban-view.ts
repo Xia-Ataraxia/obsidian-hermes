@@ -24,6 +24,8 @@ export class KanbanView extends HermesView {
   profile = "";
   readonly selected = new Set<string>();
   readonly failed = new Set<string>();
+  /** The column each card was last painted in, so a move can be told from a repaint. */
+  readonly painted = new Map<string, Status>();
   anchor = "";
   dragging: string[] | null = null;
   readonly allow = new Set<Status>();

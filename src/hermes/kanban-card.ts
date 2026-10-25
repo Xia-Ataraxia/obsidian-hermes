@@ -14,6 +14,10 @@ export function renderCard(this: KanbanView, parent: HTMLElement, c: Card, now: 
   el.toggleClass("is-selected", this.selected.has(c.id));
   el.toggleClass("is-failed", this.failed.has(c.id));
   el.toggleClass("is-open", this.drawer?.id === c.id);
+  // A card that changed column since the last paint (dropped here, or moved by an agent) lands with a spring and a flash.
+  const was = this.painted.get(c.id);
+  el.toggleClass("is-moved", was !== undefined && was !== c.status);
+  this.painted.set(c.id, c.status);
 
   const top = el.createDiv("hm-k-card-top");
   const check = top.createEl("input", { cls: "hm-k-check", attr: { type: "checkbox" } });
