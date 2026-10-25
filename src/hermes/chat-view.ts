@@ -87,7 +87,7 @@ export class ChatView extends HermesView {
     }
     // All of it before the base, which then sees no alias change; one reload reads the right profile and thread.
     // ponytail: opening still reads twice, since onOpen's read predates this one and the reload queues behind it.
-    if (typeof alias === "string") this.alias = alias;
+    if (typeof alias === "string" && this.host.servers().includes(alias)) this.alias = alias;
     if (typeof profile === "string") { try { this.profile = safeToken(profile); } catch { /* keep the current one */ } }
     await super.setState(state, result);
     // Re-revealing the leaf passes no state: nothing to read again.
@@ -123,7 +123,21 @@ export class ChatView extends HermesView {
     this.stopButton = iconButton(composer, "square", STOP, () => this.streams.get(this.key())?.(), "hm-stop");
     this.stopButton.hidden = true;
     this.button = iconButton(composer, "send-horizontal", "Send", () => this.send());
+    // The head and composer need no pull; drawn now, an unreachable host still shows them.
+    if (this.alias) this.render();
     await opened;
+  }
+
+  /** The chrome follows the host list too: a new host draws it, losing the last one clears it. */
+  override serversChanged(): void {
+    super.serversChanged();
+    if (this.closed || !this.input) return;
+    if (this.alias) { if (!this.busy()) this.render(); return; }
+    this.head.empty();
+    this.headSig = "";
+    this.input.placeholder = "";
+    this.hudKey = "";
+    this.hud.reset();
   }
 
   /** Drops our ssh processes; the turns themselves finish on the server. */
