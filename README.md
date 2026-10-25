@@ -2,14 +2,15 @@
 
 Monitor and manage remote Hermes Agent profiles over SSH: kanban boards, a profile canvas, skills, cron jobs and chat.
 
-![The Hermes Control Center profiles canvas, kanban board and chat panel.](https://raw.githubusercontent.com/Xia-Ataraxia/obsidian-hermes/main/docs/assets/demo.webp)
+![The Hermes Control Center kanban board and chat panel before an SSH host is added, showing the "No SSH host" start state. Live profiles, boards and queued chat messages need a host and are not shown.](https://raw.githubusercontent.com/Xia-Ataraxia/obsidian-hermes/main/docs/assets/demo.webp)
 
 ## Features
 
 - Profiles canvas: each [Hermes Agent](https://github.com/NousResearch/hermes-agent) profile as a card with activity sparkline, token and cost totals, and edges that show how much profiles work together.
 - Profile popup to browse sessions, turn skills and cron jobs on or off, and edit the Soul, User and Memory documents.
 - Kanban for every board on the host, with live updates and notices when a task gets stuck.
-- Chat side panel to talk to any profile, and a cron calendar with today and week views.
+- Chat side panel to talk to any profile: type `/` for a skills menu, see what is running right now in a live strip under the log, and keep typing while a turn runs, because messages queue above the composer and send in order.
+- Cron calendar with today and week views.
 
 ## Usage
 
