@@ -61,8 +61,12 @@ export class ChatHud {
     if (epoch !== this.epoch) return;
     this.reading = false;
     this.readAt = Date.now();
-    // A failed read keeps what is shown until the next one.
-    if (!hud) return;
+    // A failed read keeps what is shown until the next one; with nothing shown yet, say so quietly.
+    this.el.toggleClass("is-offline", !hud);
+    if (!hud) {
+      if (!this.hud) this.summary.setText("Activity unavailable");
+      return;
+    }
     this.hud = hud;
     this.render();
   }

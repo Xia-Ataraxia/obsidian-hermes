@@ -1,4 +1,4 @@
-import { AbstractInputSuggest, type App } from "obsidian";
+import { AbstractInputSuggest, setTooltip, type App } from "obsidian";
 import { matchSkills, type Invocation, type Pick } from "./skills-chat";
 import { icon } from "./ui";
 
@@ -41,11 +41,19 @@ export class SkillSuggest extends AbstractInputSuggest<Pick> {
 }
 
 /** A skill turn in the transcript: the skill as a name tag, then what the user asked of it. */
-export function skillBlock(parent: HTMLElement, { name, instruction }: Invocation): HTMLElement {
+const STATE_ICONS = { running: "loader-circle", done: "check", failed: "triangle-alert" } as const;
+const STATE_LABELS = { running: "Running", done: "Done", failed: "Failed" } as const;
+
+/** `state` is the turn's, when the block is the live one; the history shows no status. */
+export function skillBlock(parent: HTMLElement, { name, instruction }: Invocation, state?: keyof typeof STATE_ICONS): HTMLElement {
   const el = parent.createDiv({ cls: "hm-chat-user is-skill" });
   const tag = el.createDiv("hm-skill-tag");
-  icon(tag, "sparkles");
-  tag.createSpan({ text: `/${name}` });
+  icon(tag, "sparkles", "hm-icon hm-skill-glyph");
+  tag.createSpan({ cls: "hm-skill-name", text: `/${name}` });
+  if (state) {
+    const mark = icon(tag, STATE_ICONS[state], `hm-icon hm-skill-state is-${state}`);
+    setTooltip(mark, STATE_LABELS[state]);
+  }
   if (instruction) el.createDiv({ cls: "hm-skill-text", text: instruction });
   return el;
 }

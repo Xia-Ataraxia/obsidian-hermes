@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildHud, elapsed, hudScript, LINGER, parseHud, parseProcs } from "../src/hermes/hud";
 import { HermesChat } from "../src/hermes/chat";
+import { SendQueue, type Queued } from "../src/hermes/send-queue";
 import { askFor, invocationOf, matchSkills, slashSkill, userInvocation } from "../src/hermes/skills-chat";
 import { parseSections, type Sections } from "../src/hermes/remote";
 import type { Activity, Session, Subagent } from "../src/hermes/activity";
@@ -87,4 +88,26 @@ test("send preloads the skill with --skills after --resume and refuses an unsafe
   const refused = await chat.send("h", "logos", "", "hi", () => {}, () => {}, "-x; rm").done;
   expect(refused).toMatchObject({ refused: true });
   expect(sent).toEqual([]);
+});
+
+test("SendQueue keeps order, holds while paused, retries a requeued message first and resets when emptied", () => {
+  const q = new SendQueue();
+  const add = (draft: string) => q.push({ alias: "h", profile: "p", draft, query: draft, skill: "" });
+  const [a, b, c] = [add("a"), add("b"), add("c")] as [Queued, Queued, Queued];
+  expect([a.id, b.id, c.id]).toEqual([1, 2, 3]);
+  expect(q.remove(b.id)?.draft).toBe("b");
+  expect(q.remove(99)).toBeUndefined();
+  expect(q.take()).toBe(a);
+  q.requeue(a);
+  q.paused = true;
+  expect(q.take()).toBeUndefined();
+  expect(q.list.map(i => i.draft)).toEqual(["a", "c"]);
+  q.paused = false;
+  expect([q.take()?.draft, q.take()?.draft, q.take()]).toEqual(["a", "c", undefined]);
+  q.paused = true;
+  add("d");
+  expect(q.paused).toBe(false);
+  q.paused = true;
+  q.clear();
+  expect([q.list.length, q.paused]).toEqual([0, false]);
 });
