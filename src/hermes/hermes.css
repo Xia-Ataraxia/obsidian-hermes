@@ -782,6 +782,42 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 /* ponytail: the status bar is fixed over the right split's bottom edge (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */
 .mod-right-split .hm-chat-composer { padding-bottom: 36px; }
 
+/* ═════ Chat: skills and the running-now strip ═════ */
+.hm-chat-user.is-skill { display: flex; flex-direction: column; gap: 2px; white-space: normal; animation: hm-rise var(--anim-duration-moderate) var(--anim-motion-smooth); }
+.hm-skill-tag { display: flex; align-items: center; gap: 4px; color: var(--interactive-accent); font-family: var(--font-monospace); font-size: 12px; font-weight: 600; }
+.hm-skill-tag .svg-icon { width: 13px; height: 13px; }
+.hm-skill-text { white-space: pre-wrap; }
+.hm-skill-item .suggestion-note { white-space: normal; }
+
+.hm-hud { flex: none; border-top: 1px solid var(--hm-line); font-size: 12px; }
+.hm-hud-bar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; color: var(--text-faint); }
+.hm-hud.has-items .hm-hud-bar { color: var(--text-muted); }
+.hm-hud-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); transition: background-color var(--anim-duration-moderate) var(--anim-motion-smooth); }
+.hm-hud.is-busy .hm-hud-dot { background: var(--hm-good); box-shadow: 0 0 0 0 color-mix(in srgb, var(--hm-good) 45%, transparent); animation: hm-pulse 2.2s ease-out infinite; }
+.hm-hud-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--anim-duration-moderate) var(--anim-motion-smooth); }
+.hm-hud.has-items .hm-hud-fold { grid-template-rows: 1fr; }
+.hm-hud-list { display: flex; flex-direction: column; min-height: 0; max-height: 132px; overflow: hidden auto; }
+.hm-hud-row { display: flex; align-items: center; gap: 6px; padding: 2px 12px; color: var(--text-muted); animation: hm-rise var(--anim-duration-moderate) var(--anim-motion-smooth); }
+.hm-hud-row.is-leaving { animation: hm-sink var(--anim-duration-moderate) var(--anim-motion-smooth) forwards; pointer-events: none; }
+.hm-hud-mark { display: flex; flex: none; color: var(--text-faint); }
+.hm-hud-mark .svg-icon { width: 13px; height: 13px; }
+.hm-hud-row.is-running .hm-hud-mark { color: var(--hm-good); animation: hm-breathe 1.8s ease-in-out infinite; }
+.hm-hud-row.is-done .hm-hud-mark { color: var(--hm-good); }
+.hm-hud-row.is-failed .hm-hud-mark { color: var(--hm-bad); }
+.hm-hud-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-hud-model { flex: none; max-width: 40%; overflow: hidden; color: var(--text-faint); text-overflow: ellipsis; white-space: nowrap; }
+.hm-hud-model:empty { display: none; }
+.hm-hud-time { flex: none; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+@keyframes hm-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes hm-sink { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(8px); } }
+@keyframes hm-breathe { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .hm-view.hm-view .hm-hud-row, .hm-view.hm-view .hm-chat-user.is-skill { animation-name: hm-fade-in; animation-duration: 0.3s; }
+  .hm-view.hm-view .hm-hud-row.is-leaving { animation-name: hm-fade-out; animation-duration: 0.3s; }
+  .hm-view.hm-view .hm-hud.is-busy .hm-hud-dot, .hm-view.hm-view .hm-hud-row.is-running .hm-hud-mark { animation-duration: 4.4s; }
+}
+@keyframes hm-fade-out { to { opacity: 0; } }
+
 /* ═════ Activity pane ═════ */
 .hm-act { --hm-line: var(--background-modifier-border); --hm-soft: color-mix(in srgb, var(--text-normal) 4%, transparent); --hm-good: var(--color-green); --hm-warn: var(--color-orange); --hm-bad: var(--color-red); font-size: var(--font-ui-small); container-type: inline-size; }
 .hm-act-head { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
