@@ -121,6 +121,7 @@ export class ChatView extends HermesView {
       this.send();
     });
     this.stopButton = iconButton(composer, "square", STOP, () => this.streams.get(this.key())?.(), "hm-stop");
+    this.stopButton.hidden = true;
     this.button = iconButton(composer, "send-horizontal", "Send", () => this.send());
     await opened;
   }

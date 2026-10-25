@@ -841,7 +841,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 @keyframes hm-fade-out { to { opacity: 0; } }
 
 /* ═════ Chat: queued messages ═════ */
-.hm-chat-composer [hidden] { display: none; }
+.hm-view.hm-view .hm-chat-composer [hidden] { display: none; }
 .hm-stop { color: var(--hm-bad); }
 .hm-stop:not([hidden]) { animation: hm-pop 0.35s var(--hm-spring); }
 .hm-queue { display: grid; flex: none; grid-template-rows: 0fr; transition: grid-template-rows var(--anim-duration-moderate) var(--anim-motion-smooth); }
