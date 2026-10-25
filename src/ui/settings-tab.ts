@@ -61,15 +61,9 @@ export class HermesCronSettingsTab extends PluginSettingTab {
             onEdit: (alias) => this.editTarget(alias),
             onCheck: (alias) => void this.checkConnection(alias),
             onRemove: (alias) => void this.removeServer(alias),
+            onKanban: (alias) => void this.plugin.openHermes(KANBAN_VIEW, alias),
+            onProfiles: (alias) => void this.plugin.openHermes(PROFILES_VIEW, alias),
           }),
-          ...this.plugin.settings.servers.map((alias) => ({
-            name: alias,
-            render: (setting: Setting) => {
-              setting
-                .addExtraButton(button => button.setIcon("square-kanban").setTooltip("Kanban").onClick(() => void this.plugin.openHermes(KANBAN_VIEW, alias)))
-                .addExtraButton(button => button.setIcon("network").setTooltip("Profiles").onClick(() => void this.plugin.openHermes(PROFILES_VIEW, alias)));
-            },
-          })),
         ],
       },
       { type: "group", heading: "Profiles", items: profiles.length === 0 ? [{ name: "No profile known yet. Check a server to list its profiles." }] : [] },

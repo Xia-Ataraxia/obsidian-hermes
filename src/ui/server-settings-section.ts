@@ -5,7 +5,8 @@ import type { ServerSectionOptions } from "../types/contracts";
 /**
  * Definitions for the connection section: the add row, then one row per registered SSH target.
  *
- * Kept apart from the settings tab so the three-icon row (edit, check, remove) exists once.
+ * Kept apart from the settings tab so each server's row (open Kanban or Profiles, edit, check, remove) exists once:
+ * Obsidian keys setting rows by name, so a second row per alias would collide.
  * Every action is a callback; this module owns no state and performs no persistence.
  */
 export function serverDefinitions(options: ServerSectionOptions): SettingDefinition[] {
@@ -51,6 +52,12 @@ function serverRow(alias: string, options: ServerSectionOptions): SettingDefinit
     desc: options.statusOf(alias),
     render: (setting) => {
       setting
+        .addExtraButton((button) =>
+          button.setIcon("square-kanban").setTooltip("Kanban").onClick(() => options.onKanban(alias)),
+        )
+        .addExtraButton((button) =>
+          button.setIcon("network").setTooltip("Profiles").onClick(() => options.onProfiles(alias)),
+        )
         .addExtraButton((button) =>
           button
             .setIcon("pencil")
