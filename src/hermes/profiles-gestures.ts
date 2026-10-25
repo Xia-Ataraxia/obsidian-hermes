@@ -79,9 +79,7 @@ export function bindGestures(this: ProfilesView): void {
         const el = (marquee ??= canvas.createDiv("hm-marquee"));
         const x = Math.min(startX, e.clientX) - bounds.left, y = Math.min(startY, e.clientY) - bounds.top;
         const w = Math.abs(e.clientX - startX), h = Math.abs(e.clientY - startY);
-        el.style.transform = `translate(${x}px, ${y}px)`;
-        el.style.width = `${w}px`;
-        el.style.height = `${h}px`;
+        el.setCssProps({ "--mq-x": `${x}px`, "--mq-y": `${y}px`, "--mq-w": `${w}px`, "--mq-h": `${h}px` });
         const { x: cx, y: cy, k } = this.camera;
         const area = { x: (x - cx) / k, y: (y - cy) / k, w: w / k, h: h / k };
         this.pick([...base, ...rects.filter(([, r]) => overlap(area, r) > 0).map(([other]) => other)]);
