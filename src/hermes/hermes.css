@@ -710,7 +710,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 
 /* modals and notices render outside .hm-view: Obsidian variables only */
 .hm-modal { width: min(520px, 92vw); }
-.hm-modal:has(.is-grid) { width: min(640px, 92vw); }
+.hm-modal.is-grid { width: min(640px, 92vw); }
 .hm-modal .setting-item-heading { padding-inline: 0; }
 .hm-form { display: flex; flex-direction: column; gap: 10px; }
 .hm-form.is-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
@@ -749,7 +749,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-head .hm-gw { margin-left: 0; }
 .hm-chat-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .hm-chat-log { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-x: hidden; overflow-y: auto; }
-.hm-chat-history, .hm-chat-turn { display: contents; }
+.hm-chat-history, .hm-chat-turn { display: flex; flex-direction: column; gap: 10px; }
+.hm-chat-history:empty, .hm-chat-turn:empty { display: none; }
 .hm-chat-log .hm-empty { flex: 1; height: auto; }
 .hm-chat-log .hm-stat { align-self: flex-start; white-space: normal; overflow-wrap: anywhere; }
 .hm-chat-log .hm-error { margin-top: 0; user-select: text; }
