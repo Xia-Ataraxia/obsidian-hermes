@@ -737,8 +737,17 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-notice-row:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-view.hm-view *, .hm-view.hm-view *::before, .hm-view.hm-view *::after { animation: none; transition: none; }
+  .hm-view.hm-view .hm-spinning svg, .hm-view.hm-view .hm-empty-icon .lucide-loader { animation-duration: 2.7s; }
+  .hm-view.hm-view .hm-gw.is-live, .hm-view.hm-view .hm-act-dot.is-live, .hm-view.hm-view .hm-act-dot.is-running { animation-duration: 4.8s; }
+  .hm-view.hm-view .hm-chip.is-busy, .hm-view.hm-view .hm-k-card.is-running::after, .hm-view.hm-view .hm-chat-chip.is-streaming .hm-avatar { animation-duration: 4.4s; }
+  .hm-view.hm-view .hm-skeleton { animation-duration: 3.6s; }
+  .hm-view.hm-view .hm-drawer { transform: none; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
+  .hm-view.hm-view .hm-drawer.is-open { opacity: 1; pointer-events: auto; }
+  .hm-view.hm-view .hm-k-card.is-dragging { transform: none; }
 }
+
+@keyframes hm-fade-in { from { opacity: 0.6; } to { opacity: 1; } }
+.hm-pane > * { animation: hm-fade-in 0.14s ease-out; }
 
 /* ═════════════ Chat ═════════════ */
 
@@ -822,5 +831,5 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-act .hm-chip.is-warn { --c: var(--hm-warn); }
 .hm-act .hm-icon.is-warn { color: var(--hm-warn); }
 @media (prefers-reduced-motion: reduce) {
-  .hm-act.hm-act *, .hm-act.hm-act *::before { animation: none; transition: none; }
+  .hm-act.hm-act .hm-act-dot.is-live, .hm-act.hm-act .hm-act-dot.is-running { animation-duration: 4.8s; }
 }
