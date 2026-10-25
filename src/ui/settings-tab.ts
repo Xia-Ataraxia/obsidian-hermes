@@ -10,7 +10,8 @@ import { discoverProfiles } from "./profile-discovery-runner";
 import { profileDefinitions } from "./profile-settings-section";
 import { serverDefinitions } from "./server-settings-section";
 import { KANBAN_VIEW } from "../hermes/kanban-view";
-import { EDGE_MODES, PROFILES_VIEW } from "../hermes/profiles-view";
+import { EDGE_MODES } from "../hermes/profiles-common";
+import { PROFILES_VIEW } from "../hermes/profiles-view";
 import { hue } from "../hermes/geometry";
 
 /** Actionable reason per transport failure, so the user knows what to fix outside the plugin. */
