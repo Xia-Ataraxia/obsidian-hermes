@@ -866,7 +866,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-queue-mark .svg-icon { width: 13px; height: 13px; }
 .hm-queue-title { flex: none; white-space: nowrap; }
 .hm-queue-gap { flex: 1; }
-.hm-queue-why { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+.hm-queue-why { overflow: hidden; color: var(--text-error); text-overflow: ellipsis; white-space: nowrap; }
 .hm-queue.is-paused .hm-queue-mark { color: var(--hm-warn); }
 .hm-queue-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; padding-bottom: 6px; overflow: hidden auto; }
 .hm-queue-chip { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 6px; border: 1px dashed var(--hm-line); border-radius: 8px; background: var(--hm-soft); color: var(--text-muted); font-size: 12px; animation: hm-rise 0.4s var(--hm-spring); }
