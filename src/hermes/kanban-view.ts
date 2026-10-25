@@ -498,7 +498,7 @@ export class KanbanView extends HermesView {
     if (go.some(([, d]) => d === "reclaim") && !await confirmed(this.app, "Reclaim", CONFIRM.reclaim, "Reclaim", true)) return;
     // "block" gets here only for a drop onto To-do (a drop onto Blocked asked above): a dependency block, which has no reason to ask for.
     await this.apply(alias, board, go.map(([c, d]): Verb => d === "reclaim" ? { verb: d, id: c.id, reason: "reclaimed from Obsidian" }
-      : d === "block" ? { verb: d, id: c.id, kind: "dependency", reason: "moved to To-do from Obsidian" } : { verb: d, id: c.id } as Verb), to);
+      : d === "block" ? { verb: d, id: c.id, kind: "dependency", reason: "moved to To-do from Obsidian" } : { verb: d, id: c.id }), to);
   }
 
   /** A running card needs `reassign`; the CLI refuses it while its worker holds it, unless `--reclaim` stops the worker first, so
