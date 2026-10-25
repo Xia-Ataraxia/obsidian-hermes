@@ -2,7 +2,7 @@
 
 Monitor and manage remote Hermes Agent profiles over SSH: kanban boards, a profile canvas, skills, cron jobs and chat.
 
-![The Hermes Control Center kanban board and chat panel before an SSH host is added, showing the "No SSH host" start state. Live profiles, boards and queued chat messages need a host and are not shown.](https://raw.githubusercontent.com/Xia-Ataraxia/obsidian-hermes/main/docs/assets/demo.webp)
+![Hermes Control Center: a kanban board with sample data, the Connections settings where you add an SSH host alias, and the chat panel in its "No SSH host" start state. No real host is connected.](https://raw.githubusercontent.com/Xia-Ataraxia/obsidian-hermes/main/docs/assets/demo.webp)
 
 ## Features
 
