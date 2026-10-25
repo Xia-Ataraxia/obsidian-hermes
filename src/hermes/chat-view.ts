@@ -145,10 +145,10 @@ export class ChatView extends HermesView {
   }
 
   /** The base's empty states replace the log, so the next render must rebuild it. */
-  protected override empty(iconName: string, text: string, action?: string, onAction?: () => void): void {
+  protected override empty(iconName: string, text: string, action?: string, onAction?: () => void, detail?: string): void {
     this.sig = this.turnSig = "";
     this.live = null;
-    super.empty(iconName, text, action, onAction);
+    super.empty(iconName, text, action, onAction, detail);
   }
 
   /** Switch to `profile`; its thread, draft and any running turn come back with it. */

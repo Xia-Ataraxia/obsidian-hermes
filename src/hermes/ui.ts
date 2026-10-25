@@ -5,6 +5,7 @@ import type { ActivityClient } from "./activity";
 import type { DiskCache } from "./cache";
 import type { HermesClient } from "./data";
 import { hue } from "./geometry";
+import { plainWhy } from "./send-queue";
 import type { InspectClient } from "./inspect";
 import type { KanbanClient } from "./kanban";
 
@@ -219,7 +220,7 @@ export abstract class HermesView extends ItemView {
       if (this.closed || ctx !== this.ctx) return;
       if (error !== null) {
         // Whatever is on screen, saved or live, stays; only an empty view shows the error in its place.
-        if (!this.loadedAt) this.empty("wifi-off", error, "Retry", () => void this.reload());
+        if (!this.loadedAt) this.fail("wifi-off", error);
         else if (!quiet && !this.again) new Notice(`Hermes: ${error}`, 10_000);
         this.stamp.addClass("is-stale");
         setTooltip(this.stamp, error);
@@ -234,7 +235,7 @@ export abstract class HermesView extends ItemView {
       if (!this.busy()) this.render();
     })().catch((e: unknown) => {
       console.error(e);
-      if (!this.closed) this.empty("triangle-alert", e instanceof Error ? e.message : String(e), "Retry", () => void this.reload());
+      if (!this.closed) this.fail("triangle-alert", e instanceof Error ? e.message : String(e));
     }).finally(() => {
       this.inflight = null;
       if (this.closed) return;
@@ -311,11 +312,21 @@ export abstract class HermesView extends ItemView {
     setTooltip(this.stamp, `${this.fromCache ? "Cached ·" : "Updated"} ${new Date(this.loadedAt).toLocaleTimeString()}`);
   }
 
-  protected empty(iconName: string, text: string, action?: string, onAction?: () => void): void {
+  protected empty(iconName: string, text: string, action?: string, onAction?: () => void, detail?: string): void {
     this.body.empty();
     const box = this.body.createDiv("hm-empty");
     icon(box, iconName, "hm-empty-icon");
     box.createDiv({ text });
     if (action && onAction) box.createEl("button", { text: action }).addEventListener("click", onAction);
+    if (detail) {
+      const more = box.createEl("details", { cls: "hm-empty-more" });
+      more.createEl("summary", { text: "Details" });
+      more.createEl("pre", { text: detail });
+    }
+  }
+
+  /** A failure reads as plain copy; the raw error waits behind Details. */
+  protected fail(iconName: string, error: string): void {
+    this.empty(iconName, plainWhy(error), "Retry", () => void this.reload(), error);
   }
 }
