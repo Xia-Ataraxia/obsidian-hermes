@@ -265,6 +265,7 @@ export class ProfileModal extends Modal {
     const { pane } = this;
     const top = keep ? pane.scrollTop : 0;
     const typing = pane.querySelector("input:focus") !== null;
+    pane.toggleClass("is-switching", !keep);
     this.popEditScope();
     this.owner.unload();
     this.owner = new Component();

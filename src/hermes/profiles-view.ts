@@ -163,15 +163,12 @@ export class ProfilesView extends HermesView {
   place(id: string): void {
     const [x, y] = this.positions.get(id) ?? [0, 0];
     const el = this.cards.get(id);
-    if (el) el.style.transform = `translate(${x}px, ${y}px)`;
+    el?.setCssProps({ "--card-x": `${x}px`, "--card-y": `${y}px` });
   }
 
   apply(): void {
     const { x, y, k } = this.camera;
-    this.world.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-    this.canvas.style.setProperty("--grid", `${22 * k}px`);
-    this.canvas.style.setProperty("--k", String(k));
-    this.canvas.style.backgroundPosition = `${x}px ${y}px`;
+    this.canvas.setCssProps({ "--grid": `${22 * k}px`, "--k": String(k), "--world-x": `${x}px`, "--world-y": `${y}px` });
     this.zoomLabel?.setText(`${Math.round(k * 100)}%`);
   }
 
