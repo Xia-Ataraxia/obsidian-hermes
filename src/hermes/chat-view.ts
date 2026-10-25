@@ -87,7 +87,7 @@ export class ChatView extends HermesView {
     }
     // All of it before the base, which then sees no alias change; one reload reads the right profile and thread.
     // ponytail: opening still reads twice, since onOpen's read predates this one and the reload queues behind it.
-    if (typeof alias === "string") this.alias = alias;
+    if (typeof alias === "string" && this.host.servers().includes(alias)) this.alias = alias;
     if (typeof profile === "string") { try { this.profile = safeToken(profile); } catch { /* keep the current one */ } }
     await super.setState(state, result);
     // Re-revealing the leaf passes no state: nothing to read again.

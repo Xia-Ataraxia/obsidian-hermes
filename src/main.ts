@@ -204,7 +204,13 @@ export default class HermesCronViewerPlugin extends Plugin {
     if (!this.targets.active) return;
     this.processes.allow(settings.servers);
     if (this.settings.persistJobNames && !settings.persistJobNames) void this.cache.drop();
+    const serversChanged = settings.servers.join("\0") !== this.settings.servers.join("\0");
     this.settings = settings;
+    if (serversChanged) {
+      for (const type of [KANBAN_VIEW, PROFILES_VIEW, CHAT_VIEW]) {
+        for (const leaf of this.app.workspace.getLeavesOfType(type)) if (leaf.view instanceof HermesView) leaf.view.serversChanged();
+      }
+    }
     this.state.setSettings(settings);
     this.scheduler.setInterval(settings.autoRefreshSeconds * 1000);
     await this.persist();

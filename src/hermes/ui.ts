@@ -152,7 +152,8 @@ export abstract class HermesView extends ItemView {
 
   override async setState(state: unknown, result: ViewStateResult): Promise<void> {
     const alias = (state as { alias?: unknown } | null)?.alias;
-    if (typeof alias === "string") {
+    // A saved layout may name a host removed since; the view then stays on a registered one.
+    if (typeof alias === "string" && this.host.servers().includes(alias)) {
       if (alias !== this.alias) {
         this.alias = alias;
         if (this.body) void this.reload();
@@ -302,6 +303,16 @@ export abstract class HermesView extends ItemView {
   /** Redraw from the data already loaded (e.g. after a color change). */
   repaint(): void {
     if (this.loadedAt && !this.busy()) this.render();
+  }
+
+  /** Settings changed the host list: rebuild the switch, move off a removed host and pull. */
+  serversChanged(): void {
+    if (this.closed || !this.toolbar) return;
+    const alias = this.alias;
+    this.buildToolbar();
+    // The rebuilt toolbar has an empty `tools`; a render refills it. A new host is cleared by reload instead.
+    if (this.alias === alias) this.repaint();
+    void this.reload();
   }
 
   private tick(): void {
