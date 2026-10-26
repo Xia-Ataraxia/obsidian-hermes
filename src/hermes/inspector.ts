@@ -4,7 +4,7 @@ import { keepDetail } from "./cache";
 import type { CronJob, Profile } from "./data";
 import { type Detail, type PluginInfo, type SkillInfo, type ToolUse } from "./inspect";
 import { confirmed } from "./kanban-drawer";
-import { avatar, type HermesHost, icon, iconButton, stat } from "./ui";
+import { avatar, failBox, type HermesHost, icon, iconButton, stat } from "./ui";
 import { ModelPicker, type Pair } from "./inspector-picker";
 import { DISCARD, type FileRead, type Filter, type PluginSort, type Runs, SOURCES, type Sort, type Tab, message, skeleton } from "./inspector-common";
 import { renderSkills, skillRow, renderFile } from "./inspector-skills";
@@ -280,8 +280,7 @@ export class ProfileModal extends Modal {
   /** Skeleton rows while the first read runs; the error with a retry once it failed. */
   pending(el: HTMLElement, rows = 3): void {
     if (!this.error) { skeleton(el, rows); return; }
-    const box = el.createDiv({ cls: "hm-error", text: this.error });
-    box.createEl("button", { text: "Retry" }).addEventListener("click", () => { this.error = null; void this.load(true); this.renderPane(); });
+    failBox(el, this.error, () => { this.error = null; void this.load(true); this.renderPane(); });
   }
 
   /** A switch that never opens its row; `locked` explains why it can't change. */

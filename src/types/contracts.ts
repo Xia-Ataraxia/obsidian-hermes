@@ -36,7 +36,7 @@ export type TokenCheck =
 export interface ServerSectionOptions {
   readonly servers: readonly string[];
   /** Status line for one server, already falling back to the not-checked-yet text. */
-  statusOf(alias: string): string;
+  statusOf(alias: string): { readonly text: string; readonly failed: boolean };
   /** True while a connection check for that server is in flight. */
   isBusy(alias: string): boolean;
   onAdd(alias: string): void;
