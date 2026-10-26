@@ -15,10 +15,12 @@ function sqlLiteral(value: string): string {
 /**
  * R7 - read the execution ledger.
  *
- * The database path is passed as a plain absolute path argument, never as a `file:` URI, so `?`,
- * `#` and `%` in the path cannot be reinterpreted as URI query syntax. `immutable`, `nolock` and
- * `vfs` are therefore not expressible by construction. `-json` is a fixed part of the contract:
- * bodies containing newlines, pipes or quotes stay structured.
+ * The first attempt passes the database as a plain absolute path with `-readonly`. Only if that
+ * fails (a WAL database without sidecar files that an older sqlite3 cannot open) does one retry
+ * open it as a `file:` URI with `immutable=1`, the same fallback as the `ro` helper in
+ * hermes/remote.ts. The path is percent-encoded for `?`, `#` and `%` so it cannot be reinterpreted
+ * as URI query syntax; `nolock` and `vfs` are not expressible. `-json` is a fixed part of the
+ * contract: bodies containing newlines, pipes or quotes stay structured.
  */
 export function buildQueryExecutions(
   home: string,
@@ -58,16 +60,19 @@ export function buildQueryExecutions(
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
   const sql =
     `SELECT ${COLUMNS} FROM executions${where} ORDER BY claimed_at DESC, id DESC LIMIT ${options.limit}`;
-  const args = `-readonly -json ${posixSingleQuote(dbPath)} ${posixSingleQuote(sql)}`;
+  const sqlArg = posixSingleQuote(sql);
+  const uri = `file:${dbPath.replace(/[%?#]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}?immutable=1`;
+  const readonly = `"$s" -readonly -json ${posixSingleQuote(dbPath)} ${sqlArg}`;
+  const immutable = `"$s" -json ${posixSingleQuote(uri)} ${sqlArg}`;
 
   return {
     ok: true,
     command: {
       kind: "queryExecutions",
-      // The observed Apple CLI cannot open WAL databases without sidecars. Select the existing
-      // CLI before the query; exec never retries a failed read through the other branch.
+      // The observed Apple CLI cannot open WAL databases without sidecars: prefer the Homebrew
+      // CLI, then fall back to immutable once if the read-only open fails.
       remoteCommand:
-        `if test -x /opt/homebrew/opt/sqlite/bin/sqlite3; then exec /opt/homebrew/opt/sqlite/bin/sqlite3 ${args}; else exec sqlite3 ${args}; fi`,
+        `s=sqlite3; if test -x /opt/homebrew/opt/sqlite/bin/sqlite3; then s=/opt/homebrew/opt/sqlite/bin/sqlite3; fi; ${readonly} 2>/dev/null || ${immutable}`,
       byteCap: BYTE_CAPS.sqlResult,
       nulSeparated: false,
     },
