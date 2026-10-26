@@ -653,7 +653,12 @@
 .hcv-stale-item {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--size-2-2);
+  align-items: baseline;
+  gap: var(--size-4-2);
+}
+
+.hcv-stale-source {
+  font-size: var(--font-ui-small);
 }
 
 .hcv-stale-reason,

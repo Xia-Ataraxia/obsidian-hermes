@@ -38,7 +38,7 @@ export class ConnectionTargetModal extends Modal {
     const root = this.contentEl;
     root.createEl("p", {
       cls: "hcv-settings-note",
-      text: "An SSH alias from your SSH config, or a host name SSH can resolve. Host, user, port, jump host and keys still come from your SSH config and agent, which are never edited.",
+      text: "An SSH alias or host name. Your SSH config is never edited.",
     });
     new Setting(root)
       .setName("SSH target")
