@@ -48,6 +48,10 @@ export class ChatHud {
     this.render();
   }
 
+  show(on: boolean): void {
+    this.el.hidden = !on;
+  }
+
   tick(): void {
     this.times();
     const running = this.hud?.items.some(i => i.state === "running") ?? false;
