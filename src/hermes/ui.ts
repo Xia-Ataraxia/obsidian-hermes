@@ -214,6 +214,8 @@ export abstract class HermesView extends ItemView {
       for (const server of servers) select.createEl("option", { text: server, value: server });
       select.value = this.alias;
       select.addEventListener("change", () => { this.alias = select.value; this.app.workspace.requestSaveLayout(); void this.reload(); });
+    } else if (this.alias) {
+      setTooltip(this.toolbar.createSpan({ cls: "hm-host", text: this.alias }), "SSH host");
     }
     this.tools = this.toolbar.createDiv("hm-tools");
     const end = this.toolbar.createDiv("hm-toolbar-end");
