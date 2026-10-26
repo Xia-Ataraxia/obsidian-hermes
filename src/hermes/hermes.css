@@ -857,7 +857,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 /* ═════ Chat: queued messages ═════ */
 .hm-view.hm-view .hm-chat-composer [hidden] { display: none; }
 .hm-chat-composer :is(textarea, button):disabled { color: var(--text-faint); cursor: not-allowed; }
-.hm-chat-composer textarea:disabled { background: var(--background-secondary); }
+/* Obsidian dims disabled fields with opacity, which fades the placeholder too; dim the box instead. */
+.hm-chat-composer textarea:disabled { opacity: 1; background: var(--background-secondary); border-color: var(--background-modifier-border); }
 .hm-chat-composer textarea:disabled::placeholder { color: var(--text-muted); }
 .hm-stop { color: var(--hm-bad); }
 .hm-stop:not([hidden]) { animation: hm-pop 0.35s var(--hm-spring); }
