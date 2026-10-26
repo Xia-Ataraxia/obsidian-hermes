@@ -126,18 +126,26 @@ export class ChatView extends HermesView {
     this.button = iconButton(composer, "send-horizontal", "Send", () => this.send());
     // The head and composer need no pull; drawn now, an unreachable host still shows them.
     if (this.alias) this.render();
-    else this.input.placeholder = NO_HOST;
+    else this.noHost(true);
     await opened;
+  }
+
+  /** Without a host there is nothing to send to: the composer reads as inactive and the activity strip steps aside. */
+  private noHost(on: boolean): void {
+    this.input.disabled = on;
+    this.button.disabled = on;
+    if (on) this.input.placeholder = NO_HOST;
+    this.hud.show(!on);
   }
 
   /** The chrome follows the host list too: a new host draws it, losing the last one clears it. */
   override serversChanged(): void {
     super.serversChanged();
     if (this.closed || !this.input) return;
+    this.noHost(!this.alias);
     if (this.alias) { if (!this.busy()) this.render(); return; }
     this.head.empty();
     this.headSig = "";
-    this.input.placeholder = NO_HOST;
     this.hudKey = "";
     this.hud.reset();
   }
