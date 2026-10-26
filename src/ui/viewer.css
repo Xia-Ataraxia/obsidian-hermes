@@ -662,6 +662,11 @@
   font-size: var(--font-ui-smaller);
 }
 
+.hcv-stale-detail::before {
+  content: "·";
+  margin-right: var(--size-2-2);
+}
+
 .hcv-output-button,
 .hcv-evidence-more {
   background: none;

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { freshnessSummary } from "../src/domain/freshness-reducer";
 import type { SkillInfo } from "../src/hermes/inspect";
 import { duration, hint, shows } from "../src/hermes/inspector-common";
 import type { Card } from "../src/hermes/kanban";
@@ -38,4 +39,13 @@ test("shows filters skills by source, the plugin filter keeps omh, disabled keep
   expect(shows(skill("hub", false), "disabled")).toBe(true);
   expect(shows(skill("hub"), "disabled")).toBe(false);
   expect(shows(skill("local"), "local")).toBe(true);
+});
+
+test("stale banner summary never repeats the transport label or raw cause", () => {
+  const base = { transport: "disconnected", sourceStatus: "read", stale: true, detail: "ssh: Could not resolve hostname" } as const;
+  expect(freshnessSummary({ ...base, lastUpdatedAt: null })).toBe("Nothing read yet");
+  const summary = freshnessSummary({ ...base, lastUpdatedAt: "2026-10-26T04:06:21.000Z" });
+  expect(summary).toStartWith("Showing the schedule from ");
+  expect(summary).not.toContain("Disconnected");
+  expect(summary).not.toContain("ssh");
 });
