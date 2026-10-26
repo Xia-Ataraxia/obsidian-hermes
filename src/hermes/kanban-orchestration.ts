@@ -3,6 +3,7 @@ import { Modal, Notice, parseYaml, Setting, setTooltip, type App, type ExtraButt
 import type { Outcome } from "./data";
 import type { BoardRead, KanbanClient } from "./kanban";
 import { confirmed, message } from "./kanban-drawer";
+import { failBox } from "./ui";
 
 type Key = "orchestrator_profile" | "default_assignee" | "auto_decompose";
 
@@ -24,6 +25,8 @@ export class OrchestrationModal extends Modal {
   private readonly drafts = new Map<string, string>();
   private status = "";
   private error = false;
+  /** Why descriptions could not be read: their rows stay hidden so a blank field never overwrites one. */
+  private metaError: string | null = null;
   private busy = false;
   private dismissed = false;
 
@@ -72,7 +75,8 @@ export class OrchestrationModal extends Modal {
       .addToggle(t => t.setValue(auto).setDisabled(this.busy).onChange(v => void this.set("auto_decompose", String(v))));
     el.createDiv({ cls: this.error ? "hm-k-error" : "hm-k-hint", text: this.status });
     new Setting(el).setName("Profile descriptions").setDesc("Descriptions guide the decomposer's routing.").setHeading();
-    for (const n of names) this.row(el, n);
+    if (this.metaError !== null) failBox(el, this.metaError, () => void this.refresh());
+    else for (const n of names) this.row(el, n);
   }
 
   private row(el: HTMLElement, name: string): void {
@@ -155,8 +159,9 @@ export class OrchestrationModal extends Modal {
     const names = this.names();
     const s = await this.host.kanban.profileMeta(this.host.alias, names).catch(message);
     if (this.dismissed || this.host.moved()) return;
+    this.metaError = typeof s === "string" ? s : null;
     if (typeof s === "string") {
-      this.say(`Failed to load descriptions: ${s}`, true);
+      this.render();
       return;
     }
     for (const n of names) {
@@ -169,6 +174,7 @@ export class OrchestrationModal extends Modal {
   }
 
   private async refresh(): Promise<void> {
+    this.say("Reloading…", false);
     await this.host.reload();
     if (this.dismissed) return;
     this.say("", false);

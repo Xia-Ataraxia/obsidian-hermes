@@ -144,10 +144,10 @@
   color: var(--text-muted);
 }
 @keyframes hm-fade-in { from { opacity: 0; transform: translateY(6px); } }
-.hm-view.hm-view .hm-empty { padding: 0 var(--size-4-4); text-align: center; animation: hm-fade-in 0.35s var(--hm-spring) both; }
-.hm-view.hm-view .hm-empty button { transition: transform 0.12s ease; }
-.hm-view.hm-view .hm-empty button:active { transform: scale(0.94); }
-.hm-view.hm-view .hm-empty.is-inline { height: auto; padding: var(--size-4-8) var(--size-4-4); }
+.hm-view.hm-view .hm-empty, .hm-modal.hm-modal .hm-empty { padding: 0 var(--size-4-4); text-align: center; animation: hm-fade-in 0.35s var(--hm-spring) both; }
+.hm-view.hm-view .hm-empty button, .hm-modal.hm-modal .hm-empty button { transition: transform 0.12s ease; }
+.hm-view.hm-view .hm-empty button:active, .hm-modal.hm-modal .hm-empty button:active { transform: scale(0.94); }
+.hm-view.hm-view .hm-empty.is-inline, .hm-modal.hm-modal .hm-empty.is-inline { height: auto; padding: var(--size-4-8) var(--size-4-4); }
 .hm-empty-more { width: 100%; max-width: 100%; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .hm-empty-more summary { cursor: pointer; }
 .hm-empty-more pre { max-height: 120px; margin: var(--size-4-1) 0 0; overflow: auto; color: var(--text-muted); font-family: var(--font-monospace); font-size: var(--font-smallest); text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
@@ -756,7 +756,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
   .hm-view.hm-view .hm-gw.is-live, .hm-view.hm-view .hm-act-dot.is-live, .hm-view.hm-view .hm-act-dot.is-running { animation-duration: 4.8s; }
   .hm-view.hm-view .hm-chip.is-busy, .hm-view.hm-view .hm-k-card.is-running::after, .hm-view.hm-view .hm-chat-chip.is-streaming .hm-avatar { animation-duration: 4.4s; }
   .hm-view.hm-view .hm-skeleton { animation-duration: 3.6s; }
-  .hm-view.hm-view .hm-empty { animation-duration: 0.6s; }
+  .hm-view.hm-view .hm-empty, .hm-modal.hm-modal .hm-empty { animation-duration: 0.6s; }
   .hm-view.hm-view .hm-drawer { transform: none; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
   .hm-view.hm-view .hm-drawer.is-open { opacity: 1; pointer-events: auto; }
   .hm-view.hm-view .hm-k-card.is-dragging { transform: none; }
