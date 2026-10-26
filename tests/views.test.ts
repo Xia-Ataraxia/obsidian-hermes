@@ -3,6 +3,8 @@ import type { SkillInfo } from "../src/hermes/inspect";
 import { duration, hint, shows } from "../src/hermes/inspector-common";
 import type { Card } from "../src/hermes/kanban";
 import { deletion, on } from "../src/hermes/kanban-prefs";
+import { hasSchedule } from "../src/ui/cron-empty";
+import type { ViewerState } from "../src/ui/viewer-state";
 
 const card = (id: string, status: Card["status"]): Card => ({ id, title: id, status, priority: 0, createdAt: 0 });
 const skill = (source: SkillInfo["source"], enabled = true): SkillInfo => ({
@@ -38,4 +40,12 @@ test("shows filters skills by source, the plugin filter keeps omh, disabled keep
   expect(shows(skill("hub", false), "disabled")).toBe(true);
   expect(shows(skill("hub"), "disabled")).toBe(false);
   expect(shows(skill("local"), "local")).toBe(true);
+});
+
+test("a source that failed before its first read is not a schedule", () => {
+  const state = (snapshots: { jobs: unknown[]; transport: string }[]) => ({ getSnapshots: () => snapshots }) as unknown as ViewerState;
+  expect(hasSchedule(state([]))).toBe(false);
+  expect(hasSchedule(state([{ jobs: [], transport: "disconnected" }]))).toBe(false);
+  expect(hasSchedule(state([{ jobs: [], transport: "connected" }]))).toBe(true);
+  expect(hasSchedule(state([{ jobs: [{}], transport: "disconnected" }]))).toBe(true);
 });
