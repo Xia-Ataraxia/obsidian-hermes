@@ -1082,3 +1082,8 @@
   text-align: center;
   animation: hm-fade-in 0.35s ease both;
 }
+
+.hcv-setting-error,
+.hcv-doc-status.hcv-setting-error {
+  color: var(--text-error);
+}

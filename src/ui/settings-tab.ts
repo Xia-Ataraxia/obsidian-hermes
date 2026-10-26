@@ -14,10 +14,10 @@ import { EDGE_MODES } from "../hermes/profiles-common";
 import { PROFILES_VIEW } from "../hermes/profiles-view";
 import { hue } from "../hermes/geometry";
 
-/** Actionable reason per transport failure, so the user knows what to fix outside the plugin. */
+/** Actionable reason per transport failure, so the user knows what to fix outside Obsidian. */
 const TRANSPORT_DETAIL: Record<TransportStatus, string> = {
   connected: "Connected.",
-  disconnected: "Could not connect. Verify `ssh <alias>` in a terminal first.",
+  disconnected: "Could not connect. Check that ssh {alias} works in a terminal.",
   "auth-failed": "Key authentication failed. Check your SSH agent and the remote authorized key.",
   "host-key-unknown": "Host key not verified. Connect once in a terminal to record it in known_hosts.",
   timeout: "Connection timed out. Check the network and the SSH alias.",
@@ -33,7 +33,7 @@ function keyOf(profile: ProfileRef): string {
 /** Server registration, profile selection and viewer limits. No secrets are stored here. */
 export class HermesCronSettingsTab extends PluginSettingTab {
   private discovered = new Map<string, readonly ProfileRef[]>();
-  private status = new Map<string, string>();
+  private status = new Map<string, { text: string; failed: boolean }>();
   private pending = new Set<string>();
 
   constructor(app: App, private readonly plugin: HermesCronViewerPlugin) {
@@ -48,14 +48,14 @@ export class HermesCronSettingsTab extends PluginSettingTab {
         type: "group",
         heading: "Connections",
         items: [
-          { name: "Cron is read-only", desc: "Profile documents save only on request." },
+          { name: "What Hermes changes", desc: "Cron jobs are read-only. Kanban tasks and profile documents change only when you ask." },
           {
             name: "SSH requirements",
             desc: "Uses your existing ~/.ssh/config aliases with key authentication only; no password is stored. The host key must already be in known_hosts.",
           },
           ...serverDefinitions({
             servers: this.plugin.settings.servers,
-            statusOf: (alias) => this.status.get(alias) ?? "Connection not checked yet.",
+            statusOf: (alias) => this.status.get(alias) ?? { text: "Connection not checked yet.", failed: false },
             isBusy: (alias) => this.pending.has(alias),
             onAdd: (alias) => void this.addServer(alias),
             onEdit: (alias) => this.editTarget(alias),
@@ -66,7 +66,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
           }),
         ],
       },
-      { type: "group", heading: "Profiles", items: profiles.length === 0 ? [{ name: "No profile known yet. Check a server to list its profiles." }] : [] },
+      { type: "group", heading: "Profiles", items: profiles.length === 0 ? [{ name: "No profiles yet", desc: "Check a server to list its profiles." }] : [] },
       ...profiles,
       {
         type: "group",
@@ -124,7 +124,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
   private async addServer(alias: string): Promise<void> {
     const settings = this.plugin.settings;
     await this.plugin.saveSettings({ ...settings, servers: [...settings.servers, alias] });
-    this.update();
+    await this.checkConnection(alias);
   }
 
   /** Opens the target editor; nothing changes until the user presses Save inside the modal. */
@@ -149,21 +149,21 @@ export class HermesCronSettingsTab extends PluginSettingTab {
     if (this.pending.has(alias)) return;
     const generation = this.plugin.targets.generation(alias);
     this.pending.add(alias);
-    this.status.set(alias, "Connecting...");
+    this.status.set(alias, { text: "Checking connection...", failed: false });
     this.update();
     try {
       const result = await discoverProfiles(this.plugin.adapter, alias);
       if (!this.plugin.settings.servers.includes(alias) || generation !== this.plugin.targets.generation(alias)) return;
       if (result.transport !== "connected") {
-        this.status.set(alias, TRANSPORT_DETAIL[result.transport]);
+        this.status.set(alias, { text: TRANSPORT_DETAIL[result.transport].replace("{alias}", alias), failed: true });
         return;
       }
       this.discovered.set(alias, result.profiles);
-      this.status.set(alias, `Connected - ${result.profiles.length} profile(s) found`);
+      this.status.set(alias, { text: `Connected. ${result.profiles.length === 1 ? "1 profile" : `${result.profiles.length} profiles`} found.`, failed: false });
       // rememberRemoteHome also seeds the in-memory state, so selected sources rebuild offline.
       this.plugin.rememberRemoteHome(alias, result.profiles[0]?.home.replace(/\/\.hermes$/, "") ?? "");
     } catch {
-      if (generation === this.plugin.targets.generation(alias) && this.plugin.settings.servers.includes(alias)) this.status.set(alias, "Connection check failed. Verify `ssh <alias>` in a terminal first.");
+      if (generation === this.plugin.targets.generation(alias) && this.plugin.settings.servers.includes(alias)) this.status.set(alias, { text: `Connection check failed. Check that ssh ${alias} works in a terminal.`, failed: true });
     } finally {
       this.pending.delete(alias);
       this.update();
