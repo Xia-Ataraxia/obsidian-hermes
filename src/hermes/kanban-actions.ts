@@ -1,5 +1,6 @@
 import { Notice } from "obsidian";
 import { askBlock, askComplete, askReassign, COLUMNS, CONFIRM, confirmed, message } from "./kanban-drawer";
+import { friendly } from "./kanban-common";
 import { OrchestrationModal } from "./kanban-orchestration";
 import { dropVerb, refusal, type Card, type Drop, type Status, type Verb } from "./kanban";
 import { MOVED, on } from "./kanban-prefs";
@@ -109,8 +110,9 @@ export async function nudgeDispatcher(this: KanbanView): Promise<void> {
   }
   const r = await this.host.kanban.nudge(alias, this.read?.board ?? this.host.board(alias))
     .catch((e: unknown) => ({ ok: false as const, message: message(e) }));
-  new Notice(r.ok ? r.text || "Dispatcher nudged; nothing to spawn." : r.message, 10_000);
-  void this.reload();
+  new Notice(r.ok ? r.text || "Dispatcher nudged; nothing to spawn." : friendly(r.message), 10_000);
+  // Quiet: a failed pull must not add a second notice for the same failure.
+  void this.reload(!r.ok);
 }
 
 /** The pill flips kanban.auto_decompose, which every board shares, like the web's. */

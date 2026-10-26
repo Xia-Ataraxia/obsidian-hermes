@@ -1,8 +1,17 @@
 import { setTooltip } from "obsidian";
 import { type Status } from "./kanban";
 import { absolute, icon, relative } from "./ui";
+import { plainWhy } from "./send-queue";
 
 export const message = (e: unknown): string => e instanceof Error ? e.message : String(e);
+
+/** One friendly line for an ssh failure; the raw stderr goes to the console only. Other CLI errors pass through. */
+export function friendly(raw: string): string {
+  const why = plainWhy(raw);
+  if (why !== "Can't reach Hermes") return raw;
+  console.debug("[hermes]", raw);
+  return `${why}. Check the SSH host in settings and try again.`;
+}
 
 export const matches = (query: string, ...texts: (string | undefined)[]): boolean => {
   const q = query.trim().toLowerCase();

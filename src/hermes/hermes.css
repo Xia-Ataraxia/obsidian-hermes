@@ -953,3 +953,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 @media (prefers-reduced-motion: reduce) {
   .hm-act.hm-act .hm-act-dot.is-live, .hm-act.hm-act .hm-act-dot.is-running { animation-duration: 4.8s; }
 }
+
+/* the form's buttons stay in view while a long form scrolls */
+.hm-modal { max-height: 85vh; }
+.hm-modal .modal-content { overflow-y: auto; }
+.hm-form .modal-button-container { position: sticky; bottom: 0; grid-column: 1 / -1; padding-block: var(--size-4-3) 0; background: var(--modal-background); }

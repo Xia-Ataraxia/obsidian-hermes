@@ -2,7 +2,7 @@ import { Component, Notice, setTooltip, type App } from "obsidian";
 import type { HermesClient } from "./data";
 import { type Card, type Diagnostic, type KanbanClient, type NewTask, type Status, type Verb } from "./kanban";
 import { icon } from "./ui";
-import { COLUMNS, CONFIRM, action, matches, message, severityIcon } from "./kanban-common";
+import { COLUMNS, CONFIRM, action, friendly, matches, message, severityIcon } from "./kanban-common";
 import { type Focus, type Suggestion, ask, askReassign, confirmed } from "./kanban-ask";
 
 /** Model suggestions from a profile's provider cache, read once per modal. */
@@ -86,7 +86,7 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
         ...(goal ? { goal: true, ...(goalMaxTurns ? { goalMaxTurns: Number(goalMaxTurns) } : {}) } : {}),
       };
       const out = await host.kanban.create(host.alias, host.slug, task).catch((e: unknown) => ({ ok: false as const, message: message(e) }));
-      if (!out.ok) return out.message;
+      if (!out.ok) return friendly(out.message);
       if (out.warning) new Notice(`⚠ ${out.warning}`, 0);
       new Notice(out.id ? `Created ${out.id}` : "Created");
       created();

@@ -41,6 +41,7 @@ export class ConnectionTargetModal extends Modal {
       text: "An SSH alias or host name. Your SSH config is never edited.",
     });
     new Setting(root)
+      .setClass("hcv-target-setting")
       .setName("SSH target")
       .addText((text) => {
         text.setValue(this.buffer).onChange((value) => {
