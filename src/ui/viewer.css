@@ -1097,3 +1097,7 @@
 .hcv-doc-status.hcv-setting-error {
   color: var(--text-error);
 }
+
+.hcv-target-setting .setting-item-info { flex: none; }
+.hcv-target-setting .setting-item-control { flex: 1 1 auto; }
+.hcv-target-setting input { width: 100%; min-width: 16em; }

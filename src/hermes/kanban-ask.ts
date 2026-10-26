@@ -116,8 +116,8 @@ class AskModal extends Modal {
       dst.addEventListener("input", () => { touched = true; });
       src.addEventListener("input", () => { if (!touched) dst.value = follow.map(src.value); });
     }
-    const hint = form.createDiv("hm-k-hint"), error = form.createDiv("hm-k-error");
-    const buttons = form.createDiv("modal-button-container");
+    const hint = form.createDiv("hm-k-hint"), footer = form.createDiv("hm-k-footer");
+    const error = footer.createDiv("hm-k-error"), buttons = footer.createDiv("modal-button-container");
     // type=button: with a submit button, Enter in any one-line field (a picker mid-choice too) would submit.
     const cta = buttons.createEl("button", { cls: a.warning ? "mod-warning" : "mod-cta", attr: { type: "button" } });
     cta.addEventListener("click", () => form.requestSubmit());
