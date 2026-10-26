@@ -19,7 +19,7 @@ test("the attach picker lists one folder at a time plus open and recent files, n
   const picker = new VaultFilePicker(app, root, f => picked.push(f));
   const rootItems = picker.getItems();
   expect(rootItems.map(e => [picker.getItemText(e), e.tag])).toEqual([
-    ["b.md", "Open"], ["sub/deep.md", "Recent"], ["sub/", undefined], ["b.md", undefined],
+    ["b.md", "Open"], ["sub/deep.md", "Recent"], ["sub/", undefined],
   ]);
 
   picker.onChooseItem(rootItems[2]!);

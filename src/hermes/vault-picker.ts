@@ -10,10 +10,10 @@ export class VaultFilePicker extends FuzzySuggestModal<Entry> {
   }
 
   getItems(): Entry[] {
-    const { folder, app } = this, entries: Entry[] = [];
+    const { folder, app } = this, entries: Entry[] = [], seen = new Set<string>();
     if (folder.parent) entries.push({ item: folder.parent, tag: "Up" });
     if (folder.isRoot()) {
-      const active = app.workspace.getActiveFile(), seen = new Set<string>();
+      const active = app.workspace.getActiveFile();
       if (active) { entries.push({ item: active, tag: "Open" }); seen.add(active.path); }
       for (const path of app.workspace.getLastOpenFiles()) {
         const file = app.vault.getFileByPath(path);
@@ -22,7 +22,7 @@ export class VaultFilePicker extends FuzzySuggestModal<Entry> {
     }
     const children = [...folder.children].sort((a, b) =>
       Number(b instanceof TFolder) - Number(a instanceof TFolder) || a.name.localeCompare(b.name));
-    for (const item of children) entries.push({ item });
+    for (const item of children) if (!seen.has(item.path)) entries.push({ item });
     return entries;
   }
 
