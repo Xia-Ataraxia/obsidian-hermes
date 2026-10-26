@@ -1076,3 +1076,8 @@
 .hcv-evidence-unavailable > .hcv-disclosure {
   margin-top: var(--size-2-2);
 }
+
+.hcv-setting-error,
+.hcv-doc-status.hcv-setting-error {
+  color: var(--text-error);
+}

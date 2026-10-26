@@ -1,4 +1,4 @@
-import { Modal, type App } from "obsidian";
+import { ButtonComponent, Modal, Setting, type App } from "obsidian";
 import type { TargetChangeResult } from "../types/contracts";
 
 /** User-facing reason per rejected target, so the message names the exact problem. */
@@ -12,15 +12,16 @@ export function describeTargetFailure(reason: Exclude<TargetChangeResult, { ok: 
 /**
  * Edits the SSH target of one registered server.
  *
- * The target is the single value this plugin stores: an alias from `~/.ssh/config` or a hostname
+ * The target is the single value stored for a server: an alias from `~/.ssh/config` or a hostname
  * that `ssh` can resolve on its own. HostName, User, Port, ProxyJump and key material keep coming
  * from your SSH configuration and agent - this dialog never reads or writes `~/.ssh/config`.
  */
 export class ConnectionTargetModal extends Modal {
   private buffer: string;
-  private message: string | null = null;
   private busy = false;
   private closed = false;
+  private messageEl: HTMLElement | null = null;
+  private controls: { setDisabled(disabled: boolean): unknown }[] = [];
 
   constructor(
     app: App,
@@ -33,14 +34,40 @@ export class ConnectionTargetModal extends Modal {
   }
 
   override onOpen(): void {
-    this.render();
+    this.setTitle("Edit connection target");
+    const root = this.contentEl;
+    root.createEl("p", {
+      cls: "hcv-settings-note",
+      text: "An SSH alias from your SSH config, or a host name SSH can resolve. Host, user, port, jump host and keys still come from your SSH config and agent, which are never edited.",
+    });
+    new Setting(root)
+      .setName("SSH target")
+      .addText((text) => {
+        text.setValue(this.buffer).onChange((value) => {
+          this.buffer = value;
+        });
+        text.inputEl.spellcheck = false;
+        text.inputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.isComposing) void this.save();
+        });
+        this.controls.push(text);
+        window.setTimeout(() => text.inputEl.select());
+      });
+    root.createEl("p", {
+      cls: "hcv-settings-note",
+      text: "A new target may be a different machine. Saving clears this server's profile selections, cached schedules and remembered remote home. Check the connection again to rediscover profiles.",
+    });
+    this.messageEl = root.createEl("p", { cls: "hcv-doc-status" });
+    this.messageEl.hide();
+    const actions = root.createDiv({ cls: "modal-button-container" });
+    this.controls.push(new ButtonComponent(actions).setButtonText("Save").setCta().onClick(() => void this.save()));
+    new ButtonComponent(actions).setButtonText("Cancel").onClick(() => this.close());
   }
 
   /** An in-flight save is never abandoned silently, and closing never reports success. */
   override close(): void {
     if (this.busy) {
-      this.message = "Saving. Wait until it finishes.";
-      this.render();
+      this.show("Saving. Wait until it finishes.", false);
       return;
     }
     super.close();
@@ -51,12 +78,23 @@ export class ConnectionTargetModal extends Modal {
     this.contentEl.empty();
   }
 
+  private show(message: string, failed: boolean): void {
+    if (!this.messageEl) return;
+    this.messageEl.setText(message);
+    this.messageEl.toggleClass("hcv-setting-error", failed);
+    this.messageEl.show();
+  }
+
+  private setBusy(busy: boolean): void {
+    this.busy = busy;
+    for (const control of this.controls) control.setDisabled(busy);
+  }
+
   private async save(): Promise<void> {
     if (this.busy) return;
     const target = this.buffer.trim();
     if (target === "") {
-      this.message = "Enter an SSH target.";
-      this.render();
+      this.show("Enter an SSH target.", true);
       return;
     }
     if (target === this.current) {
@@ -64,66 +102,23 @@ export class ConnectionTargetModal extends Modal {
       super.close();
       return;
     }
-    this.busy = true;
-    this.message = "Saving...";
-    this.render();
+    this.setBusy(true);
+    this.show("Saving...", false);
     let result: TargetChangeResult;
     try {
       result = await this.submit(target);
     } catch {
-      this.busy = false;
-      this.message = "Could not save the new target. Nothing was changed.";
-      this.render();
+      this.setBusy(false);
+      this.show("Could not save the new target. Nothing was changed.", true);
       return;
     }
     if (this.closed) return;
-    this.busy = false;
+    this.setBusy(false);
     if (!result.ok) {
-      this.message = describeTargetFailure(result.reason);
-      this.render();
+      this.show(describeTargetFailure(result.reason), true);
       return;
     }
     this.onSaved?.();
     super.close();
-  }
-
-  private render(): void {
-    const root = this.contentEl;
-    root.empty();
-
-    root.createEl("h2", { text: "Edit connection target" });
-    root.createEl("p", {
-      cls: "hcv-settings-note",
-      text: "The target is an SSH alias from your SSH config, or a host name SSH can resolve. Host, user, port, jump host and keys still come from your SSH config and agent, which this plugin never edits.",
-    });
-
-    const input = root.createEl("input", {
-      attr: { type: "text", "aria-label": "SSH target", spellcheck: "false" },
-    });
-    input.value = this.buffer;
-    input.disabled = this.busy;
-    input.addEventListener("input", () => {
-      this.buffer = input.value;
-    });
-
-    root.createEl("p", {
-      cls: "hcv-settings-note",
-      text: "Changing the target may point at a different machine. Saving clears this server's profile selections, cached schedule metadata and the remembered remote home, and marks the new target as not checked yet. Run the connection check again to rediscover profiles.",
-    });
-
-    if (this.message !== null) root.createEl("p", { cls: "hcv-doc-status", text: this.message });
-
-    const actions = root.createDiv({ cls: "hcv-doc-actions" });
-    const save = actions.createEl("button", {
-      text: "Save",
-      attr: { type: "button" },
-    });
-    save.disabled = this.busy;
-    save.addEventListener("click", () => void this.save());
-    const cancel = actions.createEl("button", {
-      text: "Cancel",
-      attr: { type: "button" },
-    });
-    cancel.addEventListener("click", () => this.close());
   }
 }

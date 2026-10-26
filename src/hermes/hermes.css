@@ -751,7 +751,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-notice-row:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
-  .hm-view.hm-view .hm-spinning svg, .hm-view.hm-view .hm-empty-icon .lucide-loader { animation-duration: 2.7s; }
+  .hm-spinning.hm-spinning svg, .hm-view.hm-view .hm-spinning svg, .hm-view.hm-view .hm-empty-icon .lucide-loader { animation-duration: 2.7s; }
   .hm-view.hm-view .hm-gw.is-live, .hm-view.hm-view .hm-act-dot.is-live, .hm-view.hm-view .hm-act-dot.is-running { animation-duration: 4.8s; }
   .hm-view.hm-view .hm-chip.is-busy, .hm-view.hm-view .hm-k-card.is-running::after, .hm-view.hm-view .hm-chat-chip.is-streaming .hm-avatar { animation-duration: 4.4s; }
   .hm-view.hm-view .hm-skeleton { animation-duration: 3.6s; }
