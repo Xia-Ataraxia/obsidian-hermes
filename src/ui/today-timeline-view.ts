@@ -6,7 +6,7 @@ import { renderFilterBar } from "./filter-bar";
 import { freshnessLabel, renderStaleCacheIcon } from "./stale-cache-indicator";
 import { renderUnplacedPanel } from "./unplaced-instants-panel";
 import type { ViewerState } from "./viewer-state";
-import { NOTICES } from "./notices";
+import { hasSchedule, renderCronEmpty, type CronViewActions } from "./cron-empty";
 import { TimelineNowMarker } from "./timeline-now-marker";
 
 export const TODAY_TIMELINE_VIEW = "hermes-cron-today-timeline";
@@ -37,7 +37,7 @@ export class TodayTimelineView extends ItemView {
     () => this.render(),
   );
 
-  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void) {
+  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void, private readonly actions: CronViewActions) {
     super(leaf);
   }
 
@@ -46,7 +46,7 @@ export class TodayTimelineView extends ItemView {
   }
 
   override getDisplayText(): string {
-    return "Hermes: Today";
+    return "Hermes today";
   }
 
   override getIcon(): string {
@@ -79,16 +79,14 @@ export class TodayTimelineView extends ItemView {
     root.empty();
     root.addClass("hcv-root");
 
-    renderFilterBar(root, this.state);
-
-    const snapshots = this.state.filteredSnapshots();
-    if (snapshots.length === 0) {
-      root.createEl("p", { cls: "hcv-empty", text: NOTICES.noSelection });
+    if (hasSchedule(this.state)) renderFilterBar(root, this.state);
+    if (renderCronEmpty(root, this.state, this.actions)) {
       this.nowMarker.release();
       root.scrollTop = scrollTop;
       return;
     }
 
+    const snapshots = this.state.filteredSnapshots();
     const { column, unplaced } = buildTodayColumn(this.state.filteredJobs(), Date.now());
     const header = root.createDiv({ cls: "hcv-day-header" });
     header.createEl("h3", { cls: "hcv-day-title", text: column.dayKey });
