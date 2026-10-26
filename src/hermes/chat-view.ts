@@ -16,6 +16,7 @@ export const CHAT_VIEW = "hermes-chat";
 const SOURCE_ICONS: Record<string, string> = { cli: "message-square", tui: "terminal", desktop: "monitor", local: "laptop", acp: "plug" };
 // There is no cancel in the gateway: stopping only drops our ssh, the turn itself runs on.
 const STOP = "Stop waiting (the reply may still arrive)";
+const NO_HOST = "Add an SSH host to chat";
 
 /** Side-panel chat with one profile at a time; every `alias/profile` keeps its own thread, draft and running turn. */
 export class ChatView extends HermesView {
@@ -125,6 +126,7 @@ export class ChatView extends HermesView {
     this.button = iconButton(composer, "send-horizontal", "Send", () => this.send());
     // The head and composer need no pull; drawn now, an unreachable host still shows them.
     if (this.alias) this.render();
+    else this.input.placeholder = NO_HOST;
     await opened;
   }
 
@@ -135,7 +137,7 @@ export class ChatView extends HermesView {
     if (this.alias) { if (!this.busy()) this.render(); return; }
     this.head.empty();
     this.headSig = "";
-    this.input.placeholder = "";
+    this.input.placeholder = NO_HOST;
     this.hudKey = "";
     this.hud.reset();
   }
