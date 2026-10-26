@@ -21,7 +21,7 @@ export function renderCronEmpty(root: HTMLElement, state: ViewerState, actions: 
   if (settings.servers.length === 0) return box("server", "Add an SSH host to see its cron schedules", "Open settings", actions.openSettings);
   if (settings.selectedSources.length === 0) return box("calendar-clock", "Pick a profile to see its cron schedule", "Open settings", actions.openSettings);
   if (!hasSchedule(state)) {
-    if (state.isRefreshing()) return box("loader", "Loading schedules...");
+    if (state.isRefreshing()) return box("loader", "Loading schedules…");
     const failed = state.getSnapshots()[0];
     if (failed) return box("wifi-off", "Can't reach Hermes", "Retry", actions.refresh, failed.statusDetail ?? `${failed.source.alias}: ${failed.transport}`);
     return box("calendar-clock", "No schedule loaded yet", "Refresh", actions.refresh);
