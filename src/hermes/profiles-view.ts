@@ -290,12 +290,12 @@ export class ProfilesView extends HermesView {
     this.undoable(`Tidied ${plural(moved.size, "card")}`, before);
   }
 
-  /** Glide cards to `to` (instant under reduced motion), then save; a new move first lands the one in flight. */
+  /** Glide cards to `to` (slower and gentler under reduced motion), then save; a new move first lands the one in flight. */
   move(to: ReadonlyMap<string, readonly [number, number]>): void {
     this.land?.();
     const win = this.contentEl.win, map = this.positions;
     const from = new Map<string, [number, number]>([...to.keys()].map(id => [id, map.get(id) ?? [0, 0]]));
-    const ms = win.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 180;
+    const reduced = win.matchMedia("(prefers-reduced-motion: reduce)").matches, ms = reduced ? 360 : 180;
     let start: number | undefined, tween = 0;
     this.dragging = true;
     const land = (): void => {
@@ -309,7 +309,7 @@ export class ProfilesView extends HermesView {
     };
     const frame = (now: number): void => {
       start ??= now;
-      const t = ms === 0 ? 1 : Math.min(1, (now - start) / ms), ease = 1 - (1 - t) ** 3;
+      const t = Math.min(1, (now - start) / ms), ease = reduced ? t * t * (3 - 2 * t) : 1 - (1 - t) ** 3;
       if (t === 1 || this.positions !== map) { land(); return; }
       for (const [id, [x, y]] of to) {
         const [fx, fy] = from.get(id)!;

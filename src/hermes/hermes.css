@@ -744,6 +744,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-field-desc, .hm-k-hint { color: var(--text-faint); font-size: var(--font-ui-smaller); line-height: 1.4; }
 .hm-k-error { color: var(--color-red); font-size: var(--font-ui-smaller); white-space: pre-wrap; }
 .hm-k-hint:empty, .hm-k-error:empty { display: none; }
+.hm-modal.hm-modal .setting-item.hm-k-subhead { margin-top: var(--size-4-6); }
 .hm-k-desc .setting-item-info { flex: none; width: 140px; }
 .hm-k-desc .setting-item-control { flex: 2 1 0; }
 .hm-k-desc textarea { flex: 1; min-height: 4.5em; resize: vertical; }
@@ -804,7 +805,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-banner > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .hm-chat-banner.is-error { background: color-mix(in srgb, var(--hm-bad) 10%, transparent); color: var(--hm-bad); }
 .hm-chat-banner-title { font-weight: var(--font-semibold); }
-.hm-chat-banner .hm-empty-more { margin-top: 2px; }
+.hm-chat-banner .hm-empty-more { margin-top: 2px; color: var(--text-muted); }
 .hm-chat-banner.is-error .clickable-icon { margin: -2px -4px -2px 0; color: inherit; }
 .hm-chat-composer { display: flex; flex: none; align-items: flex-end; gap: 6px; padding: 8px; border-top: 1px solid var(--hm-line); }
 .hm-chat-composer textarea { flex: 1; min-width: 0; max-height: 160px; padding: 6px 10px; border-radius: 8px; font-size: var(--font-ui-small); field-sizing: content; resize: none; }

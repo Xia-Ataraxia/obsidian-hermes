@@ -50,12 +50,12 @@ export function iconButton(parent: HTMLElement, name: string, label: string, onC
   return button;
 }
 
-/** Icon, one line of copy, an optional action and the raw detail behind Details. */
+/** Icon, one line of copy, an optional action (filled: it is the one next step) and the raw detail behind Details. */
 export function emptyBox(parent: HTMLElement, iconName: string, text: string, action?: string, onAction?: () => void, detail?: string, cls = ""): HTMLElement {
   const box = parent.createDiv(`hm-empty ${cls}`.trim());
   icon(box, iconName, "hm-empty-icon");
   box.createDiv({ text });
-  if (action && onAction) box.createEl("button", { text: action }).addEventListener("click", onAction);
+  if (action && onAction) box.createEl("button", { cls: "mod-cta", text: action }).addEventListener("click", onAction);
   if (detail) {
     const more = box.createEl("details", { cls: "hm-empty-more" });
     more.createEl("summary", { text: "Details" });
@@ -230,7 +230,7 @@ export abstract class HermesView extends ItemView {
       if (!quiet || entered) this.again = true;
       return this.inflight;
     }
-    if (!this.alias) return this.empty("server", "No SSH host", "Settings", () => this.host.openSettings());
+    if (!this.alias) return this.empty("server", "No SSH host", "Open settings", () => this.host.openSettings());
     this.refreshButton.addClass("hm-spinning");
     if (!quiet && !entered && !this.loadedAt) this.empty("loader", "Loading…");
     const { alias, ctx } = this;

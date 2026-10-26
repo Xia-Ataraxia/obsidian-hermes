@@ -74,7 +74,7 @@ export class OrchestrationModal extends Modal {
       .setDesc(auto ? "The dispatcher decomposes new triage tasks automatically." : "Triage tasks stay in triage until you click Decompose.")
       .addToggle(t => t.setValue(auto).setDisabled(this.busy).onChange(v => void this.set("auto_decompose", String(v))));
     el.createDiv({ cls: this.error ? "hm-k-error" : "hm-k-hint", text: this.status });
-    new Setting(el).setName("Profile descriptions").setDesc("Descriptions guide the decomposer's routing.").setHeading();
+    new Setting(el).setName("Profile descriptions").setDesc("Descriptions guide the decomposer's routing.").setHeading().setClass("hm-k-subhead");
     if (this.metaError !== null) failBox(el, this.metaError, () => void this.refresh());
     else for (const n of names) this.row(el, n);
   }

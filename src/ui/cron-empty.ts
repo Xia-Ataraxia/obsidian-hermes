@@ -15,7 +15,7 @@ export function hasSchedule(state: ViewerState): boolean {
 export function renderCronEmpty(root: HTMLElement, state: ViewerState, actions: CronViewActions): boolean {
   const settings = state.getSettings();
   const box = (iconName: string, text: string, action?: string, onAction?: () => void, detail?: string): true => {
-    emptyBox(root, iconName, text, action, onAction, detail, "hcv-empty-state").querySelector("button")?.addClass("mod-cta");
+    emptyBox(root, iconName, text, action, onAction, detail, "hcv-empty-state");
     return true;
   };
   if (settings.servers.length === 0) return box("server", "Add an SSH host to see its cron schedules", "Open settings", actions.openSettings);
