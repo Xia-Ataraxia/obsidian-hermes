@@ -1,7 +1,7 @@
 {
 	"id": "hermes-control-center",
 	"name": "Hermes Control Center",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"minAppVersion": "1.13.0",
 	"description": "Monitor and manage remote Hermes Agent profiles over SSH: kanban boards, a profile canvas, skills, cron jobs and chat.",
 	"author": "beomsu",
