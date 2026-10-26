@@ -1081,3 +1081,14 @@
 .hcv-evidence-unavailable > .hcv-disclosure {
   margin-top: var(--size-2-2);
 }
+
+.hcv-empty-state {
+  padding: var(--size-4-4);
+  text-align: center;
+  animation: hm-fade-in 0.35s ease both;
+}
+
+.hcv-setting-error,
+.hcv-doc-status.hcv-setting-error {
+  color: var(--text-error);
+}

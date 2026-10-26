@@ -1,7 +1,7 @@
 import { Notice, Scope, setTooltip } from "obsidian";
 import { byLeastRecent, EDIT_CAP, type SkillInfo } from "./inspect";
 import { renderSafe } from "./markdown";
-import { absolute, icon, iconButton, relative } from "./ui";
+import { absolute, failBox, icon, iconButton, relative } from "./ui";
 import { FILTERS, FRONTMATTER, type FileRead, SORTS, SOURCES, choose, fail, hint, message, shows, skeleton, sourceLabel } from "./inspector-common";
 import type { ProfileModal } from "./inspector";
 
@@ -136,8 +136,9 @@ export function renderFile(this: ProfileModal, el: HTMLElement, path: string, sk
     body.empty();
     if (typeof file === "string") {
       this.files.delete(path);
-      const box = body.createDiv({ cls: "hm-error", text: file });
-      box.createEl("button", { text: "Retry" }).addEventListener("click", () => this.renderPane(true));
+      edit.disabled = true;
+      setTooltip(edit, "Can't edit until the file loads");
+      failBox(body, file, () => this.renderPane(true));
       return;
     }
     const lock = skill && (skill.source === "omh" || skill.source === "plugin") ? hint(skill)

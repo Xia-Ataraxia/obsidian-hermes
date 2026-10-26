@@ -50,6 +50,26 @@ export function iconButton(parent: HTMLElement, name: string, label: string, onC
   return button;
 }
 
+/** Icon, one line of copy, an optional action and the raw detail behind Details. */
+export function emptyBox(parent: HTMLElement, iconName: string, text: string, action?: string, onAction?: () => void, detail?: string, cls = ""): HTMLElement {
+  const box = parent.createDiv(`hm-empty ${cls}`.trim());
+  icon(box, iconName, "hm-empty-icon");
+  box.createDiv({ text });
+  if (action && onAction) box.createEl("button", { text: action }).addEventListener("click", onAction);
+  if (detail) {
+    const more = box.createEl("details", { cls: "hm-empty-more" });
+    more.createEl("summary", { text: "Details" });
+    more.createEl("pre", { text: detail });
+  }
+  return box;
+}
+
+/** A failed read inside a pane: plain copy, Retry, and the raw error behind Details. */
+export function failBox(parent: HTMLElement, error: string, retry: () => void): HTMLElement {
+  const why = plainWhy(error);
+  return emptyBox(parent, why === "Can't reach Hermes" ? "wifi-off" : "triangle-alert", why, "Retry", retry, error, "is-inline");
+}
+
 /** Icon + short value, e.g. ⚡ 12. Tooltip carries the meaning. */
 export function stat(parent: HTMLElement, name: string, value: string | number, label: string, cls = "", tag: "span" | "button" = "span"): HTMLElement {
   const el = parent.createEl(tag, { cls: `hm-stat ${cls}`.trim() });
@@ -222,9 +242,9 @@ export abstract class HermesView extends ItemView {
       if (error !== null) {
         // Whatever is on screen, saved or live, stays; only an empty view shows the error in its place.
         if (!this.loadedAt) this.fail("wifi-off", error);
-        else if (!quiet && !this.again) new Notice(`Hermes: ${error}`, 10_000);
+        else if (!quiet && !this.again) new Notice(`${plainWhy(error)}. Showing the last update.`, 10_000);
         this.stamp.addClass("is-stale");
-        setTooltip(this.stamp, error);
+        setTooltip(this.stamp, `${plainWhy(error)}\n${error}`);
         return;
       }
       this.loadedAt = Date.now();
@@ -325,15 +345,7 @@ export abstract class HermesView extends ItemView {
 
   protected empty(iconName: string, text: string, action?: string, onAction?: () => void, detail?: string): void {
     this.body.empty();
-    const box = this.body.createDiv("hm-empty");
-    icon(box, iconName, "hm-empty-icon");
-    box.createDiv({ text });
-    if (action && onAction) box.createEl("button", { text: action }).addEventListener("click", onAction);
-    if (detail) {
-      const more = box.createEl("details", { cls: "hm-empty-more" });
-      more.createEl("summary", { text: "Details" });
-      more.createEl("pre", { text: detail });
-    }
+    emptyBox(this.body, iconName, text, action, onAction, detail);
   }
 
   /** A failure reads as plain copy; the raw error waits behind Details. */

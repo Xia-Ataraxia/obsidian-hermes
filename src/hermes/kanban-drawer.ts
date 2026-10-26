@@ -1,7 +1,8 @@
 import { Component, FuzzySuggestModal, Notice, Setting, setTooltip, type TFile } from "obsidian";
 import { MAX_ATTACHMENT, type Attachment, type Detail, type NotifyTarget, type TaskRow, type Verb } from "./kanban";
 import { renderSafe } from "./markdown";
-import { absolute, avatar, compact, icon, iconButton } from "./ui";
+import { absolute, avatar, compact, failBox, icon, iconButton } from "./ui";
+import { skeleton } from "./inspector-common";
 import { COLUMNS, CONFIRM, action, copy, deleteText, elapsed, mask, matches, message, when } from "./kanban-common";
 import { type Focus, ask, askBlock, askComplete, askReassign, confirmed } from "./kanban-ask";
 import { type TaskHost, diagCard, modelPicker } from "./kanban-create";
@@ -48,7 +49,7 @@ export class TaskDrawer {
       });
     });
     this.renderHead();
-    this.pane.createDiv({ cls: "hm-muted hm-pad", text: "Loading…" });
+    skeleton(this.pane, 4);
     this.el.win.requestAnimationFrame(() => this.el.addClass("is-open"));
     void this.refresh();
   }
@@ -61,7 +62,7 @@ export class TaskDrawer {
     const detail = await this.host.kanban.detail(this.host.alias, this.host.slug, this.id).catch(message);
     if (seq !== this.seq) return;
     if (typeof detail !== "string") return this.render(detail);
-    if (!this.detail) { this.pane.empty(); this.pane.createDiv({ cls: "hm-error hm-pad", text: detail }); }
+    if (!this.detail) { this.pane.empty(); failBox(this.pane, detail, () => { this.pane.empty(); skeleton(this.pane, 4); void this.refresh(); }); }
     else if (!quiet) new Notice(detail, 10_000);
   }
 
@@ -114,7 +115,7 @@ export class TaskDrawer {
     void read.then(r => {
       if (!box.isConnected || read !== this.homes) return;
       box.empty();
-      if (typeof r === "string") { box.createDiv({ cls: "hm-error", text: r }); return; }
+      if (typeof r === "string") { failBox(box, r, () => { this.homes = undefined; this.drawHomes(box); }); return; }
       const key = (t: NotifyTarget): string => `${t.platform}\n${t.chat}\n${t.thread}`;
       const subbed = new Set(r.subs.map(key)), homes = new Set(r.homes.map(key));
       for (const t of [...r.homes, ...r.subs.filter(s => !homes.has(key(s)))]) {
@@ -352,12 +353,17 @@ export class TaskDrawer {
     const head = this.head;
     head.empty();
     const top = head.createDiv("hm-k-head-top");
-    if (t) setTooltip(icon(top, COLUMNS[t.status].icon, `hm-icon hm-k-status is-${t.status}`), COLUMNS[t.status].label);
+    // Until the task reads, the board's card stands in for its title and status.
+    const card = t ?? this.host.cards().find(c => c.id === this.id);
+    if (card) setTooltip(icon(top, COLUMNS[card.status].icon, `hm-icon hm-k-status is-${card.status}`), COLUMNS[card.status].label);
     const id = top.createEl("button", { cls: "hm-k-id hm-code", text: this.id });
     setTooltip(id, "Copy id");
     id.addEventListener("click", () => copy(this.id));
     iconButton(top, "x", "Close (Esc)", () => this.host.close(), "hm-push");
-    if (!t) return;
+    if (!t) {
+      if (card) head.createDiv({ cls: "hm-drawer-name hm-k-title", text: card.title || "(untitled)" });
+      return;
+    }
     const title = head.createDiv({ cls: "hm-drawer-name hm-k-title", text: t.title || "(untitled)" });
     setTooltip(title, "Click to edit");
     title.addEventListener("click", () => this.editTitle(title, t));

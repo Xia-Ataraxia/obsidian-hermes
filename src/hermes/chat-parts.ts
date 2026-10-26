@@ -1,9 +1,22 @@
 import { Notice, setTooltip } from "obsidian";
 import type { ChatState, Tool, Turn, Usage } from "./chat";
+import { plainWhy } from "./send-queue";
 import { compact, icon, iconButton } from "./ui";
 
-/** How a finished turn ended, when that is not simply its reply. */
-export function outcome(log: HTMLElement, turn: Turn, s: ChatState, profile: string): void {
+/** A plain headline, a way to try again, and the raw error behind Details. */
+function failure(log: HTMLElement, error: string, retry?: () => void): void {
+  const box = log.createDiv("hm-chat-banner is-error");
+  icon(box, "circle-alert");
+  const body = box.createDiv();
+  body.createDiv({ cls: "hm-chat-banner-title", text: plainWhy(error) });
+  const more = body.createEl("details", { cls: "hm-empty-more" });
+  more.createEl("summary", { text: "Details" });
+  more.createEl("pre", { text: error });
+  if (retry) iconButton(box, "rotate-ccw", "Send again", retry);
+}
+
+/** How a finished turn ended, when that is not simply its reply. `retry` sends the turn again. */
+export function outcome(log: HTMLElement, turn: Turn, s: ChatState, profile: string, retry?: () => void): void {
   switch (turn.code) {
     case 0:
       if (!turn.text) log.createDiv({ cls: "hm-chat-foot", text: "No reply" });
@@ -13,7 +26,7 @@ export function outcome(log: HTMLElement, turn: Turn, s: ChatState, profile: str
       return;
     case null:
       // Refused before it ran (a closed connection, an unsafe id): nothing was sent, so this is an error.
-      if (turn.refused) log.createDiv({ cls: "hm-error", text: turn.error ?? "Not sent" });
+      if (turn.refused) failure(log, turn.error ?? "Not sent", retry);
       else log.createDiv({ cls: "hm-chat-foot", text: `Stopped waiting. If the message was accepted, the reply will appear here.${turn.error ? ` (${turn.error})` : ""}` });
       return;
     case 3: {
@@ -30,7 +43,7 @@ export function outcome(log: HTMLElement, turn: Turn, s: ChatState, profile: str
       return;
     }
     default:
-      log.createDiv({ cls: "hm-error", text: turn.error || `Exit ${turn.code}` });
+      failure(log, turn.error || `Exit ${turn.code}`, retry);
   }
 }
 

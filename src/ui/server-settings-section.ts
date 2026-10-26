@@ -11,37 +11,45 @@ import type { ServerSectionOptions } from "../types/contracts";
  */
 export function serverDefinitions(options: ServerSectionOptions): SettingDefinition[] {
   const rows = options.servers.map((alias) => serverRow(alias, options));
-  if (rows.length === 0) rows.push({ name: "No SSH host alias registered yet." });
+  if (rows.length === 0) rows.push({ name: "No SSH hosts yet", desc: "Add a host alias above to see its schedules, kanban and profiles." });
   return [addRow(options), ...rows];
 }
+
+const ADD_DESC = "A host alias from your SSH config, with key authentication already set up.";
 
 function addRow(options: ServerSectionOptions): SettingDefinition {
   return {
     name: "Add SSH host alias",
-    desc: "A host alias from your SSH config, with key authentication already set up.",
+    desc: ADD_DESC,
     render: (setting) => {
       let pending = "";
+      const add = (): void => {
+        if (pending === "") return;
+        const rejection = !checkAlias(pending).ok
+          ? "Use 1-64 characters: letters, digits, dot, underscore or hyphen."
+          : options.servers.includes(pending)
+            ? "That SSH host alias is already registered."
+            : null;
+        if (rejection !== null) {
+          setting.setDesc(rejection);
+          setting.descEl.addClass("hcv-setting-error");
+          return;
+        }
+        options.onAdd(pending);
+      };
       setting
         .addText((text) => {
           text.setPlaceholder("SSH alias").onChange((value) => {
             pending = value.trim();
+            if (!setting.descEl.hasClass("hcv-setting-error")) return;
+            setting.setDesc(ADD_DESC);
+            setting.descEl.removeClass("hcv-setting-error");
+          });
+          text.inputEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" && !event.isComposing) add();
           });
         })
-        .addExtraButton((button) =>
-          button.setIcon("plus").setTooltip("Add server").onClick(() => {
-            if (pending === "") return;
-            const rejection = !checkAlias(pending).ok
-              ? "Use 1-64 characters: letters, digits, dot, underscore or hyphen."
-              : options.servers.includes(pending)
-                ? "That SSH host alias is already registered."
-                : null;
-            if (rejection !== null) {
-              setting.setDesc(rejection);
-              return;
-            }
-            options.onAdd(pending);
-          }),
-        );
+        .addExtraButton((button) => button.setIcon("plus").setTooltip("Add server").onClick(add));
     },
   };
 }
@@ -49,8 +57,11 @@ function addRow(options: ServerSectionOptions): SettingDefinition {
 function serverRow(alias: string, options: ServerSectionOptions): SettingDefinition {
   return {
     name: alias,
-    desc: options.statusOf(alias),
     render: (setting) => {
+      const status = options.statusOf(alias);
+      const busy = options.isBusy(alias);
+      setting.setDesc(status.text);
+      setting.descEl.toggleClass("hcv-setting-error", status.failed);
       setting
         .addExtraButton((button) =>
           button.setIcon("square-kanban").setTooltip("Kanban").onClick(() => options.onKanban(alias)),
@@ -62,16 +73,17 @@ function serverRow(alias: string, options: ServerSectionOptions): SettingDefinit
           button
             .setIcon("pencil")
             .setTooltip("Edit connection target")
-            .setDisabled(options.isBusy(alias))
+            .setDisabled(busy)
             .onClick(() => options.onEdit(alias)),
         )
-        .addExtraButton((button) =>
+        .addExtraButton((button) => {
           button
-            .setIcon("plug")
-            .setTooltip("Check connection and list profiles")
-            .setDisabled(options.isBusy(alias))
-            .onClick(() => options.onCheck(alias)),
-        )
+            .setIcon(busy ? "loader" : "plug")
+            .setTooltip(busy ? "Checking connection" : "Check connection and list profiles")
+            .setDisabled(busy)
+            .onClick(() => options.onCheck(alias));
+          button.extraSettingsEl.toggleClass("hm-spinning", busy);
+        })
         .addExtraButton((button) =>
           button.setIcon("trash").setTooltip("Remove server").onClick(() => options.onRemove(alias)),
         );
