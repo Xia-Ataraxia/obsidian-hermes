@@ -756,6 +756,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
   .hm-view.hm-view .hm-chip.is-busy, .hm-view.hm-view .hm-k-card.is-running::after, .hm-view.hm-view .hm-chat-chip.is-streaming .hm-avatar { animation-duration: 4.4s; }
   .hm-view.hm-view .hm-skeleton { animation-duration: 3.6s; }
   .hm-view.hm-view .hm-empty { animation-duration: 0.6s; }
+  .hm-view.hm-view .hm-chat-live::after { animation-duration: 3s; }
   .hm-view.hm-view .hm-drawer { transform: none; opacity: 0; pointer-events: none; transition: opacity 0.15s ease; }
   .hm-view.hm-view .hm-drawer.is-open { opacity: 1; pointer-events: auto; }
   .hm-view.hm-view .hm-k-card.is-dragging { transform: none; }
@@ -788,6 +789,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-user { align-self: flex-end; max-width: 85%; padding: 6px 10px; border-radius: 10px; background: var(--hm-soft); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .hm-chat-live { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .hm-chat-live:empty::before { content: "…"; color: var(--text-faint); }
+.hm-chat-live::after { content: ""; display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; border-radius: 1px; background: var(--interactive-accent); vertical-align: text-bottom; animation: hm-caret 1.1s ease-in-out infinite; }
+@keyframes hm-caret { 50% { opacity: 0.15; } }
 .hm-chat-tool { flex: none; border: 1px solid var(--hm-line); border-radius: 8px; font-size: 12px; }
 .hm-chat-tool summary { display: flex; align-items: center; gap: 6px; padding: 4px 8px; color: var(--text-muted); cursor: pointer; }
 .hm-chat-tool.is-error summary { color: var(--hm-bad); }
@@ -796,6 +799,10 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-foot { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .hm-chat-banner { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--hm-warn) 12%, transparent); color: var(--hm-warn); font-size: 12px; user-select: text; }
 .hm-chat-banner > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.hm-chat-banner.is-error { background: color-mix(in srgb, var(--hm-bad) 10%, transparent); color: var(--hm-bad); }
+.hm-chat-banner-title { font-weight: var(--font-semibold); }
+.hm-chat-banner .hm-empty-more { margin-top: 2px; }
+.hm-chat-banner.is-error .clickable-icon { margin: -2px -4px -2px 0; color: inherit; }
 .hm-chat-composer { display: flex; flex: none; align-items: flex-end; gap: 6px; padding: 8px; border-top: 1px solid var(--hm-line); }
 .hm-chat-composer textarea { flex: 1; min-width: 0; max-height: 160px; padding: 6px 10px; border-radius: 8px; font-size: 13px; field-sizing: content; resize: none; }
 /* ponytail: the status bar is fixed over the right split's bottom edge (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */

@@ -67,6 +67,11 @@ export class ChatView extends HermesView {
   /** A streaming turn repaints itself; a poll's rebuild would only fight it. */
   protected override busy(): boolean { return this.streams.has(this.key()); }
 
+  /** A turn on screen, failed or not, stays there; only an empty log gives way to the error. */
+  protected override fail(iconName: string, error: string): void {
+    if (this.state(this.key()).turn) this.render(); else super.fail(iconName, error);
+  }
+
   private key(profile = this.profile): string { return `${this.alias}/${profile}`; }
 
   private state(key: string): ChatState {
@@ -377,7 +382,7 @@ export class ChatView extends HermesView {
         queue.paused = true;
         this.pauseWhy.set(key, user && code === null ? "" : turn.error ?? `Exit ${code}`);
       }
-      this.repaint(); // also when off screen: the chip stops pulsing
+      this.render(); // also before the first load and off screen: Stop hides and the chip stops pulsing
       // A read already in flight may predate the reply; pull once more after it, or the turn waits for the next poll.
       // The next queued message goes out only after, so its `after` bound counts this reply.
       const settled = key !== this.key() ? Promise.resolve() : this.pulling ? this.reload(true).then(() => this.reload(true)) : this.reload(true);
@@ -517,7 +522,9 @@ export class ChatView extends HermesView {
         chips(now, turn.tools);
         if (!turn.done) this.live = now.createDiv("hm-chat-live").appendChild(now.doc.createTextNode(turn.text));
         else if (turn.text) markdown(now, this.turnMd, turn.text);
-        if (turn.done) outcome(now, turn, s, this.profile);
+        // A queued message already offers Retry in the queue bar; a second way would send it twice.
+        const retry = this.queues.get(key)?.list.length ? undefined : () => this.dispatch(turn.user, turn.user, turn.skill);
+        if (turn.done) outcome(now, turn, s, this.profile, retry);
         if (turn.usage) foot(now, turn.usage);
       }
     }
