@@ -1,4 +1,4 @@
-import { Notice, setTooltip } from "obsidian";
+import { setTooltip } from "obsidian";
 import { type Status } from "./kanban";
 import { absolute, icon, relative } from "./ui";
 
@@ -38,10 +38,6 @@ export const CONFIRM = {
 /** The Delete confirm: the count, that it can't be undone, and that a running task's worker is stopped first (the archive step does that). */
 export const deleteText = (n: number, running: number): string =>
   `Delete ${n === 1 ? "this task" : `${n} tasks`} permanently? This can't be undone.${running ? ` ${running === 1 ? "A running worker is" : `${running} running workers are`} stopped first.` : ""}`;
-
-export function copy(text: string, what = text): void {
-  void navigator.clipboard.writeText(text).then(() => new Notice(`Copied ${what}`), () => new Notice(text));
-}
 
 /** Relative time that the view's minute tick keeps fresh; the absolute time is the tooltip. */
 export function when(parent: HTMLElement, at: number | undefined, cls = "hm-muted"): HTMLElement {

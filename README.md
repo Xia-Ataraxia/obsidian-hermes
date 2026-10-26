@@ -26,13 +26,18 @@ Desktop only, because the plugin runs your system's `ssh`.
 
 **Manual**: download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/Xia-Ataraxia/obsidian-hermes/releases/latest) into `<vault>/<configDir>/plugins/hermes-control-center/`, then enable the plugin. `<configDir>` is your vault's configuration folder (`.obsidian` by default).
 
+## Shell and network access
+
+- **What is spawned**: your system's `ssh` program, through Node's `child_process`, with the host alias you configured. Nothing else is spawned and no local shell commands run.
+- **When it runs**: when a Hermes view opens or refreshes (manually, or on the auto-refresh interval you set in settings), when you check a host in settings, and when you take an action. With no host added, nothing runs.
+- **What runs on the host**: each read or action runs one short POSIX shell script, using standard tools such as `cat`, read-only `sqlite3` queries and the `hermes` command. While a Kanban board is open, one SSH session stays open and about three times a second asks the board's database, read-only, whether anything changed.
+- **Network**: the plugin connects only to the SSH hosts you add. No other service is contacted and no telemetry is sent. Your Hermes agent may call model providers as you configured it; that traffic comes from your host, not from the plugin.
+
 ## Disclosures
 
-- **Network use**: the plugin connects only to the SSH hosts you add, by running your system's `ssh` program. Each read or action runs one short POSIX shell script on that host, using standard tools such as `cat`, read-only `sqlite3` queries and the `hermes` command. While a Kanban board is open, one SSH session stays open and about three times a second asks the board's database, read-only, whether anything changed. No other service is contacted. Your Hermes agent may call model providers as you configured it; that traffic comes from your host, not from the plugin.
 - **Changes on the host**: only when you ask: toggling a skill, plugin or cron job, saving a skill or document, changing a Kanban task or board, or sending a chat message. A chat message is handled by your Hermes agent, which can use the tools you allowed it.
-- **Shell execution**: the plugin starts your system's `ssh` program through Node's `child_process`, and nothing else; no local shell commands run. It runs `ssh <your alias>` with the scripts described above when a Hermes view opens or refreshes (manually or on the auto-refresh interval), when you check a host in settings, and when you take an action.
-- **Vault access**: the vault is never scanned on startup or in the background. Only "Attach a vault file" on a Kanban task lists your vault's file paths, when you open that picker, and only the file you choose is read and uploaded to that task on your host. Downloaded attachments are saved to your attachment folder.
-- **Clipboard**: copy buttons (commands, chat resume commands) write to the clipboard when you click them. The plugin never reads the clipboard.
+- **Vault access**: the vault is never scanned or listed as a whole. "Attach a vault file" on a Kanban task shows the open and recently opened files and lets you browse one folder at a time; only the file you choose is read and uploaded to that task on your host. Downloaded attachments are saved to your attachment folder.
+- **Clipboard**: never read or written. Commands and IDs are shown as selectable text instead.
 - **Files outside the vault**: none are read by the plugin. Your system `ssh` reads your SSH config, keys and agent as usual.
 - **Account or payment**: none, apart from your own Hermes host.
 - **Stored data**: settings and the canvas layout are in the plugin's `data.json`. Last-seen boards (card titles only), profiles, schedules and skill rows are cached in the plugin's `cache` folder and can be cleared from settings; secrets and chat transcripts are never written to disk.
