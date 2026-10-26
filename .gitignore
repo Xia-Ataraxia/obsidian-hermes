@@ -2,3 +2,12 @@ node_modules/
 dist/
 *.js.map
 .DS_Store
+
+# synced from boiler-template
+.vscode
+*.iml
+.idea
+*.map
+data.json
+.claude/
+.omc/
