@@ -30,6 +30,9 @@ Desktop only, because the plugin runs your system's `ssh`.
 
 - **Network use**: the plugin connects only to the SSH hosts you add, by running your system's `ssh` program. Each read or action runs one short POSIX shell script on that host, using standard tools such as `cat`, read-only `sqlite3` queries and the `hermes` command. While a Kanban board is open, one SSH session stays open and about three times a second asks the board's database, read-only, whether anything changed. No other service is contacted. Your Hermes agent may call model providers as you configured it; that traffic comes from your host, not from the plugin.
 - **Changes on the host**: only when you ask: toggling a skill, plugin or cron job, saving a skill or document, changing a Kanban task or board, or sending a chat message. A chat message is handled by your Hermes agent, which can use the tools you allowed it.
+- **Shell execution**: the plugin starts your system's `ssh` program through Node's `child_process`, and nothing else; no local shell commands run.
+- **Vault access**: "Attach a vault file" on a Kanban task lists your vault's file paths in a picker, and only the file you choose is read and uploaded to that task on your host. Downloaded attachments are saved to your attachment folder.
+- **Clipboard**: copy buttons (commands, chat resume commands) write to the clipboard when you click them. The plugin never reads the clipboard.
 - **Files outside the vault**: none are read by the plugin. Your system `ssh` reads your SSH config, keys and agent as usual.
 - **Account or payment**: none, apart from your own Hermes host.
 - **Stored data**: settings and the canvas layout are in the plugin's `data.json`. Last-seen boards (card titles only), profiles, schedules and skill rows are cached in the plugin's `cache` folder and can be cleared from settings; secrets and chat transcripts are never written to disk.
