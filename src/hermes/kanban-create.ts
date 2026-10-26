@@ -44,7 +44,7 @@ export function openCreate(host: TaskHost, column: "ready" | "triage" | "blocked
   const dialog = ask(host.app, {
     title: `New task — ${COLUMNS[column].label}`, cta: "Create",
     fields: [
-      { key: "title", label: "Title", kind: "textarea", required: true, enter: true, placeholder: column === "triage" ? "Rough idea — AI will spec it…" : "New task title…" },
+      { key: "title", label: "Title", kind: "textarea", rows: 1, required: true, enter: true, placeholder: column === "triage" ? "Rough idea — AI will spec it…" : "New task title…" },
       { key: "body", label: "Description", kind: "textarea", mono: true },
       { key: "assignee", label: column === "triage" ? "Specifier" : "Assignee", kind: "dropdown", options: [["", "(blank = dispatcher picks)"], ...host.profiles().map((p): [string, string] => [p, p])] },
       { key: "priority", label: "Priority", kind: "number", value: "0" },
