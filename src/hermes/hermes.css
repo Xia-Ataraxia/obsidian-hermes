@@ -812,8 +812,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-banner.is-error .clickable-icon { margin: -2px -4px -2px 0; color: inherit; }
 .hm-chat-composer { display: flex; flex: none; align-items: flex-end; gap: 6px; padding: 8px; border-top: 1px solid var(--hm-line); }
 .hm-chat-composer textarea { flex: 1; min-width: 0; max-height: 160px; padding: 6px 10px; border-radius: 8px; font-size: var(--font-ui-small); field-sizing: content; resize: none; }
-/* ponytail: the status bar is fixed over the right split's bottom edge (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */
-.mod-right-split .hm-chat-composer { padding-bottom: 36px; }
+/* ponytail: the status bar is fixed over the window's bottom-right corner, the right split or, with it collapsed, the main area (~28px, no height variable); hard-coded clearance, idle space where a theme hides the bar. */
+.mod-right-split .hm-chat-composer, .mod-root .hm-chat-composer { padding-bottom: 36px; }
 
 /* ═════ Chat: skills and the running-now strip ═════ */
 .hm-chat-user.is-skill { display: flex; flex-direction: column; gap: 4px; min-width: 55%; padding: 8px 10px 8px 12px; border: 1px solid var(--hm-line); border-radius: 10px; background: var(--background-secondary); white-space: normal; }
