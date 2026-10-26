@@ -15,10 +15,12 @@ export function serverDefinitions(options: ServerSectionOptions): SettingDefinit
   return [addRow(options), ...rows];
 }
 
+const ADD_DESC = "A host alias from your SSH config, with key authentication already set up.";
+
 function addRow(options: ServerSectionOptions): SettingDefinition {
   return {
     name: "Add SSH host alias",
-    desc: "A host alias from your SSH config, with key authentication already set up.",
+    desc: ADD_DESC,
     render: (setting) => {
       let pending = "";
       const add = (): void => {
@@ -39,6 +41,9 @@ function addRow(options: ServerSectionOptions): SettingDefinition {
         .addText((text) => {
           text.setPlaceholder("SSH alias").onChange((value) => {
             pending = value.trim();
+            if (!setting.descEl.hasClass("hcv-setting-error")) return;
+            setting.setDesc(ADD_DESC);
+            setting.descEl.removeClass("hcv-setting-error");
           });
           text.inputEl.addEventListener("keydown", (event) => {
             if (event.key === "Enter" && !event.isComposing) add();
