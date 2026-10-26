@@ -130,6 +130,7 @@
 }
 .hm-tools { display: flex; flex: 1; align-items: center; gap: var(--hm-gap); min-width: 0; }
 .hm-toolbar-end { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.hm-host { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: var(--font-ui-smaller); text-overflow: ellipsis; white-space: nowrap; }
 .hm-server, .hm-k-select { height: 28px; font-size: var(--font-ui-smaller); }
 .hm-stamp { color: var(--text-faint); font-size: var(--font-ui-smaller); font-variant-numeric: tabular-nums; }
 .hm-stamp.is-stale { color: var(--hm-warn); }
