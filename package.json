@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-hermes",
-	"version": "1.0.7",
+	"version": "1.0.8",
 	"private": true,
 	"description": "Obsidian plugin to monitor and manage remote Hermes Agent profiles over SSH.",
 	"license": "MIT",
