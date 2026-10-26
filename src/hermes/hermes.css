@@ -26,6 +26,8 @@
 .hm-pad-x { padding: 0 16px; }
 .hm-view .hm-push { margin-left: auto; }
 .hm-code { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+.hm-selectable { cursor: text; user-select: text; }
+.hm-picker-tag { margin-left: var(--size-4-2); color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .hm-count {
   min-width: 18px;
   padding: 0 6px;
@@ -646,6 +648,7 @@ button.hm-k-rail:hover { background: var(--hm-soft); box-shadow: none; }
 .hm-k-diag-title { color: var(--text-normal); font-weight: 600; }
 .hm-k-diag-detail { color: var(--text-muted); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hm-k-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.hm-k-cli { padding: 2px 6px; border-radius: var(--radius-s); background: var(--hm-soft); color: var(--text-normal); overflow-wrap: anywhere; }
 
 /* task drawer */
 .hm-k-drawer { top: var(--hm-k-top, 44px); }
@@ -653,8 +656,7 @@ button.hm-k-rail:hover { background: var(--hm-soft); box-shadow: none; }
 .hm-k-head-top { display: flex; align-items: center; gap: 8px; }
 .hm-k-status { width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c); }
 .hm-k-status svg { width: 15px; height: 15px; }
-button.hm-k-id { height: auto; padding: 2px 4px; background: none; box-shadow: none; color: var(--text-muted); }
-button.hm-k-id:hover { background: var(--background-modifier-hover); box-shadow: none; color: var(--text-normal); }
+.hm-drawer .hm-k-id { padding: 2px 4px; color: var(--text-muted); }
 .hm-k-title { overflow-wrap: anywhere; cursor: text; }
 input.hm-k-title { width: 100%; height: 32px; font-size: var(--font-ui-medium); font-weight: 650; }
 .hm-k-chips { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -805,6 +807,7 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-chat-banner > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .hm-chat-banner.is-error { background: color-mix(in srgb, var(--hm-bad) 10%, transparent); color: var(--hm-bad); }
 .hm-chat-banner-title { font-weight: var(--font-semibold); }
+.hm-chat-banner code { display: block; margin-top: 4px; padding: 2px 6px; border-radius: var(--radius-s); background: var(--hm-soft); color: var(--text-normal); overflow-wrap: anywhere; }
 .hm-chat-banner .hm-empty-more { margin-top: 2px; color: var(--text-muted); }
 .hm-chat-banner.is-error .clickable-icon { margin: -2px -4px -2px 0; color: inherit; }
 .hm-chat-composer { display: flex; flex: none; align-items: flex-end; gap: 6px; padding: 8px; border-top: 1px solid var(--hm-line); }

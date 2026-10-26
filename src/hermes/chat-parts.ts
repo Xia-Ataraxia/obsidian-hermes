@@ -1,4 +1,4 @@
-import { Notice, setTooltip } from "obsidian";
+import { setTooltip } from "obsidian";
 import type { ChatState, Tool, Turn, Usage } from "./chat";
 import { plainWhy } from "./send-queue";
 import { compact, icon, iconButton } from "./ui";
@@ -33,13 +33,9 @@ export function outcome(log: HTMLElement, turn: Turn, s: ChatState, profile: str
       // Approvals, "Input required" and Unknown execution blocks: only the TUI can answer them, so offer the way there.
       const banner = log.createDiv("hm-chat-banner");
       icon(banner, "triangle-alert");
-      banner.createDiv({ text: turn.error ?? "Input required" });
+      const body = banner.createDiv({ text: turn.error ?? "Input required" });
       const sid = turn.sid || s.sid;
-      if (sid) {
-        iconButton(banner, "copy", "Copy resume command", () => {
-          void navigator.clipboard.writeText(`hermes -p ${profile} chat --resume ${sid}`).then(() => new Notice("Copied"));
-        });
-      }
+      if (sid) body.createEl("code", { cls: "hm-code hm-selectable", text: `hermes -p ${profile} chat --resume ${sid}` });
       return;
     }
     default:

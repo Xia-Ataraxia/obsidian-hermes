@@ -2,7 +2,7 @@ import { Component, Notice, setTooltip, type App } from "obsidian";
 import type { HermesClient } from "./data";
 import { type Card, type Diagnostic, type KanbanClient, type NewTask, type Status, type Verb } from "./kanban";
 import { icon } from "./ui";
-import { COLUMNS, CONFIRM, action, copy, matches, message, severityIcon } from "./kanban-common";
+import { COLUMNS, CONFIRM, action, matches, message, severityIcon } from "./kanban-common";
 import { type Focus, type Suggestion, ask, askReassign, confirmed } from "./kanban-ask";
 
 /** Model suggestions from a profile's provider cache, read once per modal. */
@@ -145,7 +145,7 @@ export function diagCard(parent: HTMLElement, host: TaskHost, task: { id: string
       }
       case "cli_hint": {
         const command = typeof payload.command === "string" && payload.command ? payload.command : a.label;
-        action(row, label, () => copy(command, "command"), "copy", "Copy command to clipboard");
+        setTooltip(row.createEl("code", { cls: "hm-k-cli hm-code hm-selectable", text: command }), label);
         break;
       }
       case "comment":

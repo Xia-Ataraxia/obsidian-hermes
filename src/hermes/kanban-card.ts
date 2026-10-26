@@ -1,5 +1,5 @@
 import { Menu, setTooltip } from "obsidian";
-import { COLUMNS, copy, severityIcon, severityRank, when } from "./kanban-drawer";
+import { COLUMNS, severityIcon, severityRank, when } from "./kanban-drawer";
 import { dropVerb, staleness, STATUSES, type Card, type Status } from "./kanban";
 import { avatar, iconButton, stat } from "./ui";
 import { CAPPED, NEEDS, plural } from "./kanban-prefs";
@@ -30,12 +30,7 @@ export function renderCard(this: KanbanView, parent: HTMLElement, c: Card, now: 
     this.anchor = c.id;
     this.render();
   });
-  const id = top.createSpan({ cls: "hm-k-id hm-code", text: c.id });
-  setTooltip(id, "Copy id");
-  id.addEventListener("click", event => {
-    event.stopPropagation();
-    copy(c.id);
-  });
+  top.createSpan({ cls: "hm-k-id hm-code", text: c.id });
   const diags = this.diags[c.id] ?? [];
   if (diags.length) {
     const sev = diags.map(d => d.severity).reduce((a, b) => severityRank(b) > severityRank(a) ? b : a);
@@ -158,7 +153,5 @@ export function cardMenu(this: KanbanView, c: Card): Menu {
     menu.addItem(i => i.setTitle(to === "archived" ? "Archive" : `Move to ${COLUMNS[to].label}`).setIcon(COLUMNS[to].icon)
       .setWarning(to === "archived").onClick(() => void this.drop([c.id], to)));
   }
-  menu.addSeparator();
-  menu.addItem(i => i.setTitle("Copy ID").setIcon("copy").onClick(() => copy(c.id)));
   return menu;
 }

@@ -1,11 +1,12 @@
-import { Component, FuzzySuggestModal, Notice, Setting, setTooltip, type TFile } from "obsidian";
+import { Component, Notice, Setting, setTooltip, type TFile } from "obsidian";
 import { MAX_ATTACHMENT, type Attachment, type Detail, type NotifyTarget, type TaskRow, type Verb } from "./kanban";
 import { renderSafe } from "./markdown";
 import { absolute, avatar, compact, failBox, icon, iconButton } from "./ui";
 import { skeleton } from "./inspector-common";
-import { COLUMNS, CONFIRM, action, copy, deleteText, elapsed, mask, matches, message, when } from "./kanban-common";
+import { COLUMNS, CONFIRM, action, deleteText, elapsed, mask, matches, message, when } from "./kanban-common";
 import { type Focus, ask, askBlock, askComplete, askReassign, confirmed } from "./kanban-ask";
 import { type TaskHost, diagCard, modelPicker } from "./kanban-create";
+import { VaultFilePicker } from "./vault-picker";
 export * from "./kanban-common";
 export * from "./kanban-ask";
 export * from "./kanban-create";
@@ -150,13 +151,7 @@ export class TaskDrawer {
   /** Hermes guesses a vault file's content type from its name. */
   private attachVault(): void {
     const app = this.host.app, pick = (file: TFile): void => void this.upload(file.name, file.stat.size, () => app.vault.readBinary(file));
-    const modal = new (class extends FuzzySuggestModal<TFile> {
-      getItems(): TFile[] { return app.vault.getFiles(); }
-      getItemText(file: TFile): string { return file.path; }
-      onChooseItem(file: TFile): void { pick(file); }
-    })(app);
-    modal.setPlaceholder("Attach a vault file…");
-    modal.open();
+    new VaultFilePicker(app, app.vault.getRoot(), pick).open();
   }
 
   private attachFile(): void {
@@ -356,9 +351,7 @@ export class TaskDrawer {
     // Until the task reads, the board's card stands in for its title and status.
     const card = t ?? this.host.cards().find(c => c.id === this.id);
     if (card) setTooltip(icon(top, COLUMNS[card.status].icon, `hm-icon hm-k-status is-${card.status}`), COLUMNS[card.status].label);
-    const id = top.createEl("button", { cls: "hm-k-id hm-code", text: this.id });
-    setTooltip(id, "Copy id");
-    id.addEventListener("click", () => copy(this.id));
+    top.createSpan({ cls: "hm-k-id hm-code hm-selectable", text: this.id });
     iconButton(top, "x", "Close (Esc)", () => this.host.close(), "hm-push");
     if (!t) {
       if (card) head.createDiv({ cls: "hm-drawer-name hm-k-title", text: card.title || "(untitled)" });
