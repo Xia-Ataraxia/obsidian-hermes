@@ -149,7 +149,7 @@ export class HermesCronSettingsTab extends PluginSettingTab {
     if (this.pending.has(alias)) return;
     const generation = this.plugin.targets.generation(alias);
     this.pending.add(alias);
-    this.status.set(alias, { text: "Checking connection...", failed: false });
+    this.status.set(alias, { text: "Checking connection…", failed: false });
     this.update();
     try {
       const result = await discoverProfiles(this.plugin.adapter, alias);

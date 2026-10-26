@@ -114,8 +114,9 @@ export default class HermesCronViewerPlugin extends Plugin {
         return outcome;
       }).open();
     };
-    this.registerView(TODAY_TIMELINE_VIEW, (leaf) => new TodayTimelineView(leaf, this.state, openJob));
-    this.registerView(WEEK_CALENDAR_VIEW, (leaf) => new WeekCalendarView(leaf, this.state, openJob));
+    const cronActions = { openSettings: () => this.openSettings(), refresh: () => this.scheduler.trigger() };
+    this.registerView(TODAY_TIMELINE_VIEW, (leaf) => new TodayTimelineView(leaf, this.state, openJob, cronActions));
+    this.registerView(WEEK_CALENDAR_VIEW, (leaf) => new WeekCalendarView(leaf, this.state, openJob, cronActions));
 
     this.addRibbonIcon("clock", "Hermes: Today", () => {
       void this.activateView(TODAY_TIMELINE_VIEW, "right", true);

@@ -37,15 +37,9 @@ export function reduceFreshness(state: FreshnessState, event: FreshnessEvent): F
   };
 }
 
-/** Human summary for the stale banner. */
+/** Human summary for the stale banner; the transport label and raw cause are shown beside it. */
 export function freshnessSummary(state: FreshnessState): string {
-  if (!state.stale) {
-    return state.lastUpdatedAt === null
-      ? "Not read yet"
-      : `Updated ${new Date(state.lastUpdatedAt).toLocaleTimeString()}`;
-  }
-  const when = state.lastUpdatedAt === null
-    ? "never successfully read"
-    : `last read ${new Date(state.lastUpdatedAt).toLocaleTimeString()}`;
-  return `Disconnected (${state.detail ?? state.transport}); showing content from ${when}`;
+  if (state.lastUpdatedAt === null) return state.stale ? "Nothing read yet" : "Not read yet";
+  const time = new Date(state.lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return state.stale ? `Showing the schedule from ${time}` : `Updated ${time}`;
 }

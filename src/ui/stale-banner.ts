@@ -18,12 +18,12 @@ export function renderStaleBanner(
   const banner = parent.createDiv({ cls: "hcv-stale" });
   banner.createSpan({
     cls: "hcv-stale-title",
-    text: `${stale.length} source(s) not refreshed`,
+    text: `Couldn't refresh ${stale.length} ${stale.length === 1 ? "source" : "sources"}`,
   });
 
   const list = banner.createEl("ul", { cls: "hcv-stale-list" });
   for (const entry of stale) {
-    const item = list.createEl("li", { cls: "hcv-stale-item" });
+    const item = list.createEl("li", { cls: "hcv-stale-item", attr: entry.state.detail === null ? {} : { title: entry.state.detail } });
     item.createSpan({ cls: "hcv-stale-source", text: entry.label });
     item.createSpan({ cls: "hcv-stale-reason", text: TRANSPORT_LABEL[entry.state.transport] });
     item.createSpan({ cls: "hcv-stale-detail", text: freshnessSummary(entry.state) });

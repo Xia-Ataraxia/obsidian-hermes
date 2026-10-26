@@ -103,7 +103,7 @@ export class ConnectionTargetModal extends Modal {
       return;
     }
     this.setBusy(true);
-    this.show("Saving...", false);
+    this.show("Saving…", false);
     let result: TargetChangeResult;
     try {
       result = await this.submit(target);

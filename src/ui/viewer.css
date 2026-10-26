@@ -662,6 +662,11 @@
   font-size: var(--font-ui-smaller);
 }
 
+.hcv-stale-detail::before {
+  content: "·";
+  margin-right: var(--size-2-2);
+}
+
 .hcv-output-button,
 .hcv-evidence-more {
   background: none;
@@ -1075,6 +1080,12 @@
 
 .hcv-evidence-unavailable > .hcv-disclosure {
   margin-top: var(--size-2-2);
+}
+
+.hcv-empty-state {
+  padding: var(--size-4-4);
+  text-align: center;
+  animation: hm-fade-in 0.35s ease both;
 }
 
 .hcv-setting-error,

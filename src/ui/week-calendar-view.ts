@@ -8,7 +8,7 @@ import { renderStaleBanner } from "./stale-banner";
 import { renderStatusBadges } from "./transport-source-badge";
 import { renderUnplacedPanel } from "./unplaced-instants-panel";
 import type { ViewerState } from "./viewer-state";
-import { NOTICES } from "./notices";
+import { hasSchedule, renderCronEmpty, type CronViewActions } from "./cron-empty";
 
 export const WEEK_CALENDAR_VIEW = "hermes-cron-week-calendar";
 
@@ -40,7 +40,7 @@ function makeActivatable(el: HTMLElement, action: () => void): void {
 export class WeekCalendarView extends ItemView {
   private unsubscribe: (() => void) | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void) {
+  constructor(leaf: WorkspaceLeaf, private readonly state: ViewerState, private readonly openJob: (job: CronJobRecord, profile: ProfileRef) => void, private readonly actions: CronViewActions) {
     super(leaf);
   }
 
@@ -49,7 +49,7 @@ export class WeekCalendarView extends ItemView {
   }
 
   override getDisplayText(): string {
-    return "Hermes: Week";
+    return "Hermes week";
   }
 
   override getIcon(): string {
@@ -78,14 +78,13 @@ export class WeekCalendarView extends ItemView {
     root.empty();
     root.addClass("hcv-root", "hcv-week-root");
 
-    renderFilterBar(root, this.state);
-    renderStaleBanner(root, this.state.freshnessEntries());
+    if (hasSchedule(this.state)) {
+      renderFilterBar(root, this.state);
+      renderStaleBanner(root, this.state.freshnessEntries());
+    }
+    if (renderCronEmpty(root, this.state, this.actions)) return;
 
     const snapshots = this.state.filteredSnapshots();
-    if (snapshots.length === 0) {
-      root.createEl("p", { cls: "hcv-empty", text: NOTICES.noSelection });
-      return;
-    }
 
     const statusList = root.createDiv({ cls: "hcv-source-list" });
     for (const group of groupSourceStatuses(snapshots, (key) => this.state.ledgerOf(key))) {

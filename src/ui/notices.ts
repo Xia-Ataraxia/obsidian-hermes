@@ -3,11 +3,9 @@ import type { SourceStatus, TransportStatus } from "../types/remote-command";
 
 /** Catalog of every user-facing message, so wording stays consistent and reviewable. */
 export const NOTICES = {
-  noServers: "No SSH host alias registered yet. Add one in the plugin settings.",
-  noSelection: "No Hermes profile selected. Choose one in the plugin settings.",
-  discoveryStarted: (alias: string) => `Discovering Hermes profiles on ${alias}...`,
+  discoveryStarted: (alias: string) => `Discovering Hermes profiles on ${alias}…`,
   discoveryFailed: (alias: string, reason: string) => `Could not discover profiles on ${alias}: ${reason}`,
-  refreshing: "Refreshing Hermes cron sources...",
+  refreshing: "Refreshing Hermes cron sources…",
   refreshFailed: (reason: string) => `Refresh failed: ${reason}`,
   cacheCleared: "Cached schedule metadata cleared.",
   bodyUnavailable: "Output body is not held in memory. Refresh to fetch it again.",
