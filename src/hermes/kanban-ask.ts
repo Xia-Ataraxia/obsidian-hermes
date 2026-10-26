@@ -27,6 +27,8 @@ export interface Field {
   placeholder?: string; required?: boolean; desc?: string;
   /** Enter submits (Shift+Enter keeps a newline). */
   enter?: boolean;
+  /** Monospace textarea, for text the worker receives verbatim. */
+  mono?: boolean;
   suggest?: (query: string, values: Record<string, string>) => Suggestion[] | Promise<Suggestion[]>;
 }
 
@@ -77,7 +79,7 @@ class AskModal extends Modal {
       label.createSpan({ cls: "hm-k-field-label", text: f.label });
       const placeholder = f.placeholder ? { placeholder: f.placeholder } : {};
       let input: Control;
-      if (f.kind === "textarea") input = label.createEl("textarea", { attr: { rows: 3, ...placeholder } });
+      if (f.kind === "textarea") input = label.createEl("textarea", { ...(f.mono ? { cls: "is-mono" } : {}), attr: { rows: 3, ...placeholder } });
       else if (f.kind === "checkbox") {
         input = label.createEl("input", { type: "checkbox" });
         input.checked = f.value === "on";

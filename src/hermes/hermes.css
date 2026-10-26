@@ -738,7 +738,8 @@ textarea.hm-k-edit { width: 100%; min-height: 120px; font-family: var(--font-mon
 .hm-k-field.is-check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .hm-k-field.is-check input { order: -1; width: var(--checkbox-size); flex: none; margin: 0; }
 .hm-k-field.is-check .hm-k-field-desc { flex-basis: 100%; }
-.hm-k-field textarea { font-family: var(--font-monospace); font-size: 12.5px; resize: vertical; }
+.hm-k-field textarea { font-size: var(--font-ui-small); resize: vertical; }
+.hm-k-field textarea.is-mono { font-family: var(--font-monospace); }
 .hm-k-field-desc, .hm-k-hint { color: var(--text-faint); font-size: 11.5px; line-height: 1.4; }
 .hm-k-error { color: var(--color-red); font-size: 12px; white-space: pre-wrap; }
 .hm-k-hint:empty, .hm-k-error:empty { display: none; }
