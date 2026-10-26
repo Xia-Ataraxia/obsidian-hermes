@@ -1,6 +1,6 @@
 import { setTooltip } from "obsidian";
 import { only, same, taskOf, type Activity, type ActivityClient, type Call, type Delegation, type LiveLog, type Subagent, type Task } from "./activity";
-import { absolute, compact, icon, iconButton, relative, stat } from "./ui";
+import { absolute, compact, emptyBox, failBox, icon, iconButton, relative, stat } from "./ui";
 
 /* ───────────── Activity pane: what a profile is doing now, and which subagents it called ───────────── */
 
@@ -205,7 +205,7 @@ export class ActivityPane {
     this.refreshButton.removeClass("hm-spinning");
     if (typeof result === "string") {
       this.error = result;
-      if (!this.data) this.empty("wifi-off", result, true);
+      if (!this.data) { this.body.empty(); failBox(this.body, result, () => void this.refresh()); }
     } else {
       this.error = null;
       this.data = result;
@@ -227,12 +227,9 @@ export class ActivityPane {
     if (tip !== null) setTooltip(this.stamp, tip);
   }
 
-  private empty(name: string, text: string, retry = false): void {
+  private empty(name: string, text: string): void {
     this.body.empty();
-    const box = this.body.createDiv("hm-empty");
-    icon(box, name, "hm-empty-icon");
-    box.createDiv({ text });
-    if (retry) box.createEl("button", { text: "Retry" }).addEventListener("click", () => void this.refresh());
+    emptyBox(this.body, name, text);
   }
 
   /** Built off screen and swapped in one step, so the scroll position holds. */
